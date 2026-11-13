@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [main, 'claude/**']
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Typecheck, unit, integration and end-to-end tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      # The harness starts loopback-only PaperMC servers, which requires accepting the
+      # Minecraft EULA (https://aka.ms/MinecraftEULA).
+      MC_EULA: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - name: Cache Paper test server jar
+        uses: actions/cache@v4
+        with:
+          path: .test-server/cache
+          key: paper-1.21.11
+      - name: Integration tests (real PaperMC servers, offline + online mode)
+        run: npm run test:integration
+      - name: Build
+        run: npm run build
+      - name: Allow the Electron sandbox on the runner
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+      - name: End-to-end test (Electron under Xvfb, software GL)
+        run: xvfb-run -a -s "-screen 0 1400x900x24" npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-screenshots
+          path: tests/e2e/artifacts
+          if-no-files-found: ignore
+
+  package:
+    name: Package (${{ matrix.name }})
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux, os: ubuntu-latest, script: 'dist:linux' }
+          - { name: windows, os: windows-latest, script: 'dist:win' }
+          - { name: macos, os: macos-latest, script: 'dist:mac' }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build installers
+        run: npm run ${{ matrix.script }}
+        env:
+          # Unsigned by default. docs/PACKAGING.md lists the signing secrets each platform needs.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vassago-${{ matrix.name }}
+          path: |
+            release/*.AppImage
+            release/*.exe
+            release/*.dmg
+            release/*.zip
+          if-no-files-found: error
