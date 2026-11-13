@@ -23,6 +23,10 @@ describe(`Paper ${version} (client ${clientVersion}) — ${MINUTES} minute two-p
       for (const c of [op, bob]) { const d = lost(c); if (d) throw new Error(`${c.name} was disconnected while ${what}: ${d.reason}${d.detail ? ` (${d.detail})` : ''}`) }
     }
     decline(op); await op.joined(port)
+    // An interrupted earlier run may have left the whitelist on, which would refuse the second
+    // player (the operator passes it). A server that is meant to be whitelisted, with both test
+    // names on it, is run with VASSAGO_TEST_KEEP_WHITELIST=1.
+    if (process.env.VASSAGO_TEST_KEEP_WHITELIST !== '1') { op.vanilla('whitelist off'); await sleep(500) }
     decline(bob); await bob.joined(port)
     op.vanilla('difficulty peaceful') // no mobs wandering into the test
     await op.mode('creative')
@@ -55,10 +59,19 @@ describe(`Paper ${version} (client ${clientVersion}) — ${MINUTES} minute two-p
     await bob.until(() => [...bob.entities.values()].some(e => e.username === 'VassagoOp'), 15000, 'bob sees op')
 
     const until = Date.now() + MINUTES * 60_000
-    const stats = { rounds: 0, chats: 0, placed: 0, broken: 0, chests: 0, deaths: 0 }
+    const stats = { rounds: 0, moves: 0, chats: 0, placed: 0, broken: 0, chests: 0, deaths: 0 }
     while (Date.now() < until) {
       const r = stats.rounds
-      // movement: both walk, jump, sneak, sprint
+      // movement: both walk, jump, sneak, sprint — and each must be seen moving by the other,
+      // every round (entity ids change on respawn, so they are looked up by name each time)
+      const idOf = (viewer: TestClient, name: string) => [...viewer.entities.values()].find(e => e.username === name)?.id
+      await op.until(() => !!lost(op) || !!lost(bob) || (idOf(op, 'VassagoBob') != null && idOf(bob, 'VassagoOp') != null), 15000, 'players see each other')
+      alive('finding each other')
+      const relayed = [
+        bob.waitFor('entityMoves', e => e.moves.some(m => m.id === idOf(bob, 'VassagoOp')), 15000),
+        op.waitFor('entityMoves', e => e.moves.some(m => m.id === idOf(op, 'VassagoBob')), 15000)
+      ]
+      for (const p of relayed) p.catch(() => {}) // reported below, with the disconnect reason if there is one
       for (const [c, yaw] of [[op, 0], [bob, Math.PI]] as [TestClient, number][]) {
         c.send({ t: 'look', yaw, pitch: 0 })
         c.send({ t: 'controls', c: { ...idle, forward: true, jump: r % 2 === 0 } })
@@ -70,6 +83,12 @@ describe(`Paper ${version} (client ${clientVersion}) — ${MINUTES} minute two-p
       await sleep(400)
       for (const c of [op, bob]) c.send({ t: 'controls', c: idle })
       alive('moving')
+      for (const [c, dx] of [[op, 0], [bob, 2]] as [TestClient, number][]) {
+        const moved = Math.hypot(c.pos.x - (px + 0.5 + dx), c.pos.z - (pz + 0.5))
+        if (moved < 1) throw new Error(`${c.name} did not move in round ${r} (${moved.toFixed(2)} blocks from home)`)
+      }
+      await Promise.all(relayed)
+      stats.moves += 2
       await home(op, 0); await home(bob, 2)
 
       // chat both ways

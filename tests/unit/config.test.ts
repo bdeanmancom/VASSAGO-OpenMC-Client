@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { defaultConfig, fallbackProfile, isValidUsername, parseAddress, sanitizeConfig } from '../../src/shared/config'
 import { describeDisconnect } from '../../src/session/errors'
 import { titleText } from '../../src/session/session'
-import { negotiate, readStatusVersion, translatedServerVersion, versionForProtocol } from '../../src/session/versions'
+import { negotiate, pingProtocol, readStatusVersion, translatedServerVersion, versionForProtocol } from '../../src/session/versions'
+import { accountOfTokenKey, orphanedAccounts, tokenKey } from '../../src/shared/tokens'
 import { VERIFIED_TRANSLATED, VERIFIED_VERSIONS, isVerified } from '../../src/shared/protocol'
 
 describe('parseAddress', () => {
@@ -122,6 +123,12 @@ describe('server version detection', () => {
     expect(negotiate('Velocity 1.7.2-26.1', 775)).toEqual({ resolved: '26.1', serverVersion: undefined, confirmed: false })
     // a protocol we have no data for
     expect(negotiate('Paper 26.3', 777).resolved).toBeNull()
+    // a name that disagrees with a protocol number that is NOT an echo of ours is just a name:
+    // the protocol number stands, nothing is claimed, and the spoken version does not change
+    expect(pingProtocol()).toBe(775)
+    for (const name of ['Paper 1.21', 'Requires MC 1.21.4', 'Paper 26.3']) {
+      expect(negotiate(name, 774)).toEqual({ resolved: '1.21.11', serverVersion: undefined, confirmed: false })
+    }
   })
 })
 
@@ -155,5 +162,20 @@ describe('profiles in the stored configuration', () => {
     const out = sanitizeConfig(raw)
     expect(out.recents.map(r => r.pinnedProfileId)).toEqual([other.id, undefined, undefined, other.id])
     expect(out.recents.every(r => !('profileId' in r))).toBe(true)
+  })
+})
+
+describe('stored sign-ins', () => {
+  it('names the account a token key belongs to', () => {
+    expect(accountOfTokenKey(tokenKey('me@example.com', 'live'))).toBe('me@example.com')
+    expect(accountOfTokenKey(tokenKey('Microsoft account', 'mca'))).toBe('Microsoft account')
+    expect(accountOfTokenKey(tokenKey('odd:name', 'xbl'))).toBe('odd:name')
+    expect(accountOfTokenKey('something-else')).toBeNull()
+  })
+  it('finds sign-ins that no listed account uses', () => {
+    const keys = [tokenKey('kept@example.com', 'live'), tokenKey('kept@example.com', 'mca'), tokenKey('Microsoft account', 'live'), tokenKey('Microsoft account', 'xbl'), 'unrelated']
+    expect(orphanedAccounts(keys, ['kept@example.com'])).toEqual(['Microsoft account'])
+    expect(orphanedAccounts(keys, ['kept@example.com', 'Microsoft account'])).toEqual([])
+    expect(orphanedAccounts([], ['kept@example.com'])).toEqual([])
   })
 })

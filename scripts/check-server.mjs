@@ -9,8 +9,12 @@
 // the throw-away name "VassagoCheck" only far enough to see how the server answers, and
 // disconnects before joining. It never completes a login, sends no account data, and makes no
 // attempt to get past account verification. The server may log one short connection attempt.
+// Servers older than 1.20.2 are not probed at all: there a login cannot be stopped short of
+// joining. (The one case this cannot see: such a server that hides its version behind a custom
+// status name while a plugin translates for newer clients.)
 import { createRequire } from 'node:module'
 import dns from 'node:dns/promises'
+import net from 'node:net'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -71,6 +75,9 @@ export function probeLogin (host, port, version, timeoutMs = TIMEOUT_MS) {
       if (done) return
       done = true
       clearTimeout(timer)
+      // The server's first answer is all this check is for. Nothing more may be sent after it:
+      // the protocol library would otherwise acknowledge the login and carry on towards joining.
+      try { if (client) client.write = () => {} } catch {}
       try { client?.end() } catch {}
       resolve({ mode, detail })
     }
@@ -81,11 +88,12 @@ export function probeLogin (host, port, version, timeoutMs = TIMEOUT_MS) {
       finish('error', String(err?.message ?? err))
       return
     }
-    // An encryption request during login is the server asking for a verified account session.
-    client.on('encryption_begin', () => finish('online'))
-    // Any of these means the server accepted an unverified name: stop here, before joining.
-    client.on('success', () => finish('offline'))
-    client.on('login_acknowledged', () => finish('offline'))
+    // These run before the library's own handlers (prepend), so they see the answer first.
+    // An encryption request during login is the server asking for a verified account session —
+    // unless it says it only wants encryption (1.20.5+), which the app accepts as well.
+    client.prependListener('encryption_begin', p => { if (p?.shouldAuthenticate !== false) finish('online') })
+    // Login Success means the server accepted an unverified name. Stop here, before acknowledging it.
+    client.prependListener('success', () => finish('offline'))
     client.on('state', state => { if (state === 'configuration' || state === 'play') finish('offline') })
     client.on('disconnect', p => finish('rejected', flatten(p.reason)))
     client.on('kick_disconnect', p => finish('rejected', flatten(p.reason)))
@@ -94,25 +102,39 @@ export function probeLogin (host, port, version, timeoutMs = TIMEOUT_MS) {
   })
 }
 
+/**
+ * Before 1.20.2 (protocol 764) a server puts the player into the world the moment it accepts the
+ * login; from 1.20.2 on there is a configuration phase first, which the check never enters.
+ * Decided from the protocol number, so it also works for releases we have no data files for.
+ */
+export function canStopBeforeJoining (version) {
+  const protocol = mcData.versionsByMinecraftVersion.pc[version]?.version
+  return typeof protocol === 'number' && protocol >= 764 && protocol < 0x40000000
+}
+
 export async function checkServer (target, log = console.log) {
   const { host, port } = target
   const result = { host, port, reachable: false, versionName: null, protocol: null, clientVersion: null, mode: null, detail: '' }
 
   log(`Checking ${host}${port !== 25565 ? ':' + port : ''} …\n`)
+  // A name may exist only as a _minecraft._tcp SRV record (common with hosting companies); the app
+  // follows that record when no port is given, so the check does too.
+  let srv = []
+  if (port === 25565 && net.isIP(host) === 0) {
+    try { srv = await dns.resolveSrv(`_minecraft._tcp.${host}`) } catch {}
+  }
   try {
     const addrs = (await dns.lookup(host, { all: true })).map(a => a.address)
     log(`  Address        ${addrs.join(', ')}`)
   } catch (err) {
-    log(`  Address        could not be resolved (${err.code ?? err.message})`)
-    result.detail = 'Unknown host — check the spelling of the address.'
-    return result
+    if (srv.length === 0) {
+      log(`  Address        could not be resolved (${err.code ?? err.message})`)
+      result.detail = 'Unknown host — check the spelling of the address.'
+      return result
+    }
+    log('  Address        no address of its own; reached through its SRV record')
   }
-  if (!target.explicitPort) {
-    try {
-      const srv = await dns.resolveSrv(`_minecraft._tcp.${host}`)
-      if (srv.length > 0) log(`  SRV record     ${srv.map(s => `${s.name}:${s.port}`).join(', ')} (used automatically when no port is given)`)
-    } catch {}
-  }
+  if (srv.length > 0) log(`  SRV record     ${srv.map(s => `${s.name}:${s.port}`).join(', ')} (followed automatically on the default port)`)
 
   let status
   try {
@@ -134,12 +156,33 @@ export async function checkServer (target, log = console.log) {
   result.clientVersion = result.protocol != null ? versionForProtocol(result.protocol) : null
   log(`  Status         online — ${status?.players?.online ?? '?'}/${status?.players?.max ?? '?'} players, ${status.latency ?? '?'} ms`)
   log(`  Server version ${result.versionName} (protocol ${result.protocol})`)
-  log(`  Vassago speaks ${result.clientVersion ?? 'NOT SUPPORTED by this build'}`)
-  const named = (result.versionName.match(/\d+\.\d+(?:\.\d+)?/g) ?? [])
-  if (result.clientVersion && named.length === 1 && named[0] !== result.clientVersion && mcData.versionsByMinecraftVersion.pc[named[0]]?.version !== result.protocol) {
-    log(`  Note           the server names version ${named[0]} and translates between versions`)
-    log('                 (ViaVersion/ViaBackwards); the protocol number above is an echo of what this check sent.')
+  // Same reading as the app: a single plain version in the name that disagrees with the protocol
+  // number means the server translates — but only if that number is an echo of the one this
+  // check pinged with. When the server's own version is one Vassago speaks, it is used directly.
+  const named = [...result.versionName.matchAll(/\d+\.\d+(?:\.\d+)?(\.x)?/gi)]
+  const pinged = mcData(mc.defaultVersion)?.version?.version
+  /** the version the server itself runs, when its name states one that differs from what was negotiated */
+  let serverRuns = null
+  if (result.clientVersion && named.length === 1 && !named[0][1] && named[0][0] !== result.clientVersion && result.protocol === pinged) {
+    const known = mcData.versionsByMinecraftVersion.pc[named[0][0]]
+    if (!known || known.version !== result.protocol) {
+      const own = known ? versionForProtocol(known.version) : null
+      log(`  Note           the server names version ${named[0][0]} and translates between versions`)
+      log('                 (ViaVersion/ViaBackwards); the protocol number above is an echo of what this check sent.')
+      if (known) serverRuns = named[0][0]
+      if (own) { result.clientVersion = own; log('                 Vassago speaks that version itself and uses it directly.') }
+    }
   }
+  // Before 1.20.2 a server puts a player into the world the moment it accepts the login, so a
+  // login could not be stopped short of joining there. Such servers are not probed — whether that
+  // is the version being spoken or the one a translating server really runs.
+  if (result.clientVersion && (!canStopBeforeJoining(result.clientVersion) || (serverRuns && !canStopBeforeJoining(serverRuns)))) {
+    log(`  Vassago speaks nothing older than 1.20.2 (this server runs ${serverRuns ?? result.clientVersion})`)
+    result.clientVersion = null
+    result.detail = 'This server is older than 1.20.2, which Vassago does not support. The login check was skipped: on such a server it could not stop short of joining.'
+    return result
+  }
+  log(`  Vassago speaks ${result.clientVersion ?? 'NOT SUPPORTED by this build'}`)
   if (!result.clientVersion) {
     result.detail = 'This build has no protocol data for that server version, so it cannot join regardless of accounts.'
     return result
@@ -161,8 +204,8 @@ function explain (r) {
       'That is why Vassago says the server needs a Microsoft sign-in. The request comes from the server,',
       'not from the app, and Vassago will not try to get around it. You have two choices:',
       '',
-      '  1. Play with your Microsoft account: in Vassago open Profiles → "Microsoft account",',
-      '     select it and connect. You need to own Minecraft: Java Edition.',
+      '  1. Play with your Microsoft account: connect, and on the screen that explains the refusal',
+      '     choose "Sign in with Microsoft". You need to own Minecraft: Java Edition.',
       '',
       '  2. If this is YOUR server and you want private-server profiles (no Microsoft account):',
       '     • open server.properties on the server and set   online-mode=false',
@@ -180,7 +223,8 @@ function explain (r) {
       'RESULT: this server ACCEPTS private-server (offline-mode) profiles — no Microsoft account needed.',
       '',
       'If Vassago still shows a Microsoft sign-in window, the selected profile is a Microsoft profile:',
-      'open Profiles, choose (or create) a "Private server profile" and connect again.'
+      'the Play page says who it joins as. Open Profiles, add a private-server name (or make one the',
+      'default) and connect again.'
     )
   } else if (r.mode === 'rejected') {
     lines.push(
@@ -207,6 +251,7 @@ if (isMain) {
   }
   checkServer(target).then(r => {
     console.log(explain(r))
-    process.exit(0)
+    // 0: the server gave a verdict. 3: it could not be checked (unreachable, unsupported, no answer).
+    process.exit(['online', 'offline', 'rejected'].includes(r.mode) ? 0 : 3)
   }).catch(err => { console.error(String(err?.stack ?? err)); process.exit(1) })
 }

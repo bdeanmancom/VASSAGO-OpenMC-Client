@@ -78,6 +78,17 @@ export class TestClient {
   chat (text: string) { this.send({ t: 'chat', text }) }
 
   /**
+   * Listen to raw packets of this client's connection — for things the server tells other players
+   * that the session does not surface (for example that someone is sprinting). Returns an "off".
+   */
+  onPacket (name: string, fn: (packet: any) => void): () => void {
+    const client = (this.session as any).bot?._client
+    if (!client) throw new Error(`[${this.name}] not connected`)
+    client.on(name, fn)
+    return () => { client.removeListener(name, fn) }
+  }
+
+  /**
    * Run a vanilla command (operator only), e.g. `vanilla('gamemode creative')`. The `minecraft:`
    * prefix keeps the vanilla meaning on servers where a plugin replaces /give, /tp, /gamemode…
    */

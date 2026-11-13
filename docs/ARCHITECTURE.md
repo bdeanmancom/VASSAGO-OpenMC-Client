@@ -74,6 +74,13 @@ behaviour differs from what servers expect, the difference is corrected in `src/
   with `multiplayer.disconnect.invalid_player_movement`. The module sends tick-end once per client
   tick and guarantees a tick end between any two position packets, including during catch-up
   bursts and teleport answers, and steps aside if a future library version sends it itself.
+* **Sneaking and sprinting** (`src/session/input-compat.ts`). 1.21.2 added a player-input packet;
+  from 1.21.6 the server reads sneaking from it and the old sneak actions are gone, which
+  renumbered the remaining entity actions. The library sends only the input packet wherever it
+  exists and still writes the old action numbers. So on 1.21.2–1.21.5 a sneak never reached the
+  server, and on 1.21.6+ "start sprinting" arrived as "start riding jump". The module adds the
+  sneak action where the server still expects it and sends actions by name, read from the
+  protocol tables of the version in use.
 * **Connection attempts** (`Attempt` in `src/session/session.ts`). Each `connect()` gets a token
   that `teardown()` marks abandoned. Every `await` and every callback handed to the libraries checks
   it, because the libraries keep working after a cancel: a status ping, a DNS lookup or a Microsoft
@@ -94,10 +101,14 @@ behaviour differs from what servers expect, the difference is corrected in `src/
 
 ViaVersion answers a status ping with the pinging client's own protocol number, so a 26.3 server
 (protocol 777) looks like protocol 775 to a client that pings as 26.1. The client then connects as
-26.1 and ViaBackwards translates. `pingServer` notices that the server names a different game
-version than the one it will speak and reports it as `serverVersion`; the UI shows
-"26.3 · joins as 26.1". A 26.3 server **without** ViaBackwards cannot be joined yet: the
-PrismarineJS stack has no protocol data for 777.
+26.1 and ViaBackwards translates. `negotiate` in `src/session/versions.ts` reads the status name:
+when it states one plain version that disagrees with the protocol number, and that number is an
+echo of the one the ping was sent with, the server is translating. It is reported as
+`serverVersion` and the UI shows "26.3 · joins as 26.1" — unless the server's own version is one
+the client speaks, in which case that version is spoken directly, without the translation. Names
+that state a range or no version prove nothing, so such servers are joinable but never shown as
+verified. A 26.3 server **without** ViaBackwards cannot be joined yet: the PrismarineJS stack has
+no protocol data for 777.
 
 ## Version adapter layer
 
@@ -128,7 +139,9 @@ palettes and patterns; `itemicons.ts` paints item icons. Entities use simple ori
   Microsoft sign-in and project URLs opened in the system browser.
 * Microsoft sign-in uses the OAuth device-code flow (prismarine-auth); passwords never touch the app.
   Tokens are encrypted with the OS keychain via Electron `safeStorage`; without OS encryption they
-  are kept in memory only.
+  are kept in memory only. A stored sign-in always belongs to a listed Microsoft account: one made
+  for a single attempt that never joined is discarded when its screen closes, and anything left
+  without a listed account is removed at the next start.
 * A private-server (offline) profile holds no account session, so it cannot pass an online-mode
   server's verification: the key exchange completes, the server's session check fails, the server
   rejects the login and the client reports why. Nothing is done to fake or skip that check.

@@ -14,6 +14,8 @@ import { FACE_VECTORS } from '../shared/protocol'
 import { resolveVersion } from './versions'
 import { classifyError, classifyKick, type Classified } from './errors'
 import { installTickEnd } from './tick-end'
+import { installInputCompat } from './input-compat'
+import { tokenKey } from '../shared/tokens'
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const mineflayer = require('mineflayer')
@@ -95,7 +97,7 @@ export class GameSession {
   /** true while a failed Microsoft sign-in is being examined; the final disconnect is sent afterwards */
   private diagnosing = false
   private chatMessage: any = null
-  private undoTickEnd: (() => void) | null = null
+  private undoWriteFixes: (() => void) | null = null
   private spawned = false
   private chatMessageFor: any = null
   /** The connect() call that is current. Anything left over from an earlier one must stay inert. */
@@ -249,7 +251,7 @@ export class GameSession {
     const store = this.host.secureStore
     const mem = new Map<string, any>()
     return ({ cacheName, username }: { cacheName: string, username: string }) => {
-      const key = `msa:${username}:${cacheName}`
+      const key = tokenKey(username, cacheName)
       const load = async () => {
         if (mem.has(key)) return mem.get(key)
         let v: any = {}
@@ -398,8 +400,15 @@ export class GameSession {
     // --- inventory / windows
     const markWindow = guard(() => { this.windowDirty = true })
     bot.once('inject_allowed', guard(() => { bot.inventory.on('updateSlot', markWindow) }))
-    // End every client tick like the official client does (26.3 servers kick clients that don't).
-    bot.once('inject_allowed', guard(() => { this.undoTickEnd?.(); this.undoTickEnd = installTickEnd(bot) }))
+    // Outgoing packets are corrected in two layers, innermost first: sneak/sprint encodings the
+    // library gets wrong on some versions, then a tick end for every client tick like the official
+    // client sends (26.3 servers kick clients that don't).
+    bot.once('inject_allowed', guard(() => {
+      this.undoWriteFixes?.()
+      const undoInput = installInputCompat(bot)
+      const undoTickEnd = installTickEnd(bot)
+      this.undoWriteFixes = () => { undoTickEnd(); undoInput() }
+    }))
     bot.on('heldItemChanged', markWindow)
     bot.on('windowOpen', guard((w: any) => {
       w.on('updateSlot', markWindow)
@@ -459,7 +468,8 @@ export class GameSession {
         javaAccountState(bot?._client?.authflow),
         new Promise<null>(resolve => setTimeout(() => resolve(null), 8000))
       ])
-      if (state) result = { ...base, ...describeAccountState(state) }
+      // no answer within the time limit counts as "the service did not answer"
+      result = { ...base, ...describeAccountState(state ?? { owns: null, profile: 'unanswered' }) }
     } catch (err: any) {
       this.log('debug', `licence check failed: ${err?.message ?? err}`)
     } finally {
@@ -497,8 +507,8 @@ export class GameSession {
     this.bot = null
     this.attempt = null
     this.loggedIn = false
-    try { this.undoTickEnd?.() } catch {}
-    this.undoTickEnd = null
+    try { this.undoWriteFixes?.() } catch {}
+    this.undoWriteFixes = null
     this.dirtyEntities.clear()
     this.pendingBlocks = []
     this.pendingLight.clear()
@@ -869,8 +879,11 @@ export class GameSession {
 export interface JavaAccountState {
   /** licence list includes Java Edition: true / false when Microsoft's answer is clear, null when not */
   owns: boolean | null
-  /** the Java Edition profile, asked for a second time: only a 404 counts as "missing" */
-  profile: 'present' | 'missing' | 'unknown'
+  /**
+   * The Java Edition profile, asked for a second time. Only a 404 counts as "missing";
+   * "unanswered" is any other failure of the service; "unknown" means it could not be asked.
+   */
+  profile: 'present' | 'missing' | 'unanswered' | 'unknown'
 }
 
 /** Ask Minecraft services about the signed-in account, using the token the sign-in already produced. */
@@ -884,15 +897,16 @@ export async function javaAccountState (authflow: any): Promise<JavaAccountState
     const items = res?.entitlements?.items
     if (Array.isArray(items)) out.owns = items.some((i: any) => typeof i?.name === 'string' && /^(product_minecraft|game_minecraft)$/.test(i.name))
   } catch {
+    out.profile = 'unanswered'
     return out
   }
   if (typeof token !== 'string' || !token || typeof authflow.mca?.fetchProfile !== 'function') return out
   try {
     const profile = await authflow.mca.fetchProfile(token)
-    if (profile && typeof profile.name === 'string') out.profile = 'present'
+    out.profile = profile && typeof profile.name === 'string' ? 'present' : 'unanswered'
   } catch (err: any) {
     // the library throws "<status> <statusText> <body>"
-    if (/^404\b/.test(String(err?.message ?? ''))) out.profile = 'missing'
+    out.profile = /^404\b/.test(String(err?.message ?? '')) ? 'missing' : 'unanswered'
   }
   return out
 }
@@ -908,7 +922,11 @@ export function describeAccountState (state: JavaAccountState): Pick<Classified,
     // it was there on the second request: the first one simply failed
     return { kind: 'ms-signin', reason: 'Minecraft services did not return this account’s profile a moment ago. Try again.' }
   }
-  if (state.profile !== 'missing') return {} // could not find out: keep the neutral wording
+  if (state.profile === 'unanswered') {
+    // a rate limit, an outage, a timeout: says nothing about the account
+    return { kind: 'ms-signin', reason: 'Minecraft services did not answer when asked for this account’s profile. Try again in a minute.' }
+  }
+  if (state.profile !== 'missing') return {} // could not ask at all: keep the neutral wording
   if (state.owns === true) {
     return { kind: 'ms-profile-missing', reason: 'This Microsoft account owns Minecraft: Java Edition but has not created its player name yet. Start the official launcher once (or set the name at minecraft.net), then try again.' }
   }

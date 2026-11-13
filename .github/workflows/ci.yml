@@ -23,6 +23,8 @@ jobs:
         include:
           # A server the client speaks to natively.
           - { id: paper-1.21.11, name: 'Paper 1.21.11', version: '1.21.11', client: '1.21.11', via: '0', java: '21', soak: '0', force: '', e2e: '1' }
+          # The oldest version listed as verified. Headless suite only.
+          - { id: paper-1.21.4, name: 'Paper 1.21.4', version: '1.21.4', client: '1.21.4', via: '0', java: '21', soak: '0', force: '', e2e: '0' }
           # The newest version the client speaks itself. Headless suite only.
           - { id: paper-26.1.2, name: 'Paper 26.1.2', version: '26.1.2', client: '26.1', via: '0', java: '25', soak: '0', force: '', e2e: '0' }
           # A current server that admits older clients through ViaVersion/ViaBackwards:
@@ -56,7 +58,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .test-server/cache
-          key: paper-${{ matrix.version }}-via${{ matrix.via }}
+          key: paper-${{ matrix.version }}-via${{ matrix.via }}-${{ hashFiles('scripts/via-pins.json') }}
       - name: Integration tests (real PaperMC servers, offline + online mode)
         run: npm run test:integration
       - name: Two-player soak
@@ -92,7 +94,8 @@ jobs:
         include:
           - { name: linux, os: ubuntu-latest, script: 'dist:linux' }
           - { name: windows, os: windows-latest, script: 'dist:win' }
-          - { name: macos, os: macos-latest, script: 'dist:mac' }
+          # macos-15 rather than macos-latest: the newest image has repeatedly had no runner available
+          - { name: macos, os: macos-15, script: 'dist:mac' }
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
@@ -105,8 +108,24 @@ jobs:
       - name: Build installers
         run: npm run ${{ matrix.script }}
         env:
-          # Unsigned by default. docs/PACKAGING.md lists the signing secrets each platform needs.
+          # Unsigned. docs/PACKAGING.md lists what signing needs on each platform.
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      # The packaged Linux build is launched for real: the end-to-end suite runs against the
+      # unpacked application directory that the AppImage is made from.
+      - uses: actions/setup-java@v4
+        if: matrix.name == 'linux'
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Allow the Electron sandbox on the runner
+        if: matrix.name == 'linux'
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+      - name: End-to-end test of the packaged build
+        if: matrix.name == 'linux'
+        run: xvfb-run -a -s "-screen 0 1400x900x24" npm run test:e2e
+        env:
+          MC_EULA: 'true'
+          VASSAGO_APP_PATH: release/linux-unpacked/vassago-client
       - uses: actions/upload-artifact@v4
         with:
           name: vassago-${{ matrix.name }}

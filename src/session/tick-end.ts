@@ -20,7 +20,7 @@
 /** Serverbound move packets that carry a position (minecraft-data names). */
 const POSITIONAL = new Set(['position', 'position_look'])
 
-/** How long the physics loop may be silent before the fallback timer ends ticks itself. */
+/** How long the physics loop may be silent before the fallback timer ends a tick itself (and how often it then does). */
 const STALL_MS = 100
 
 export interface TickEndGuard {
@@ -59,7 +59,8 @@ export function createTickEndGuard (sendTickEnd: () => void, now: () => number =
     // on the wire that is "move, tick end, move, tick end, …" exactly like the official client.
     onClientTick () { if (!libraryEndsTicks) end() },
     // While the physics loop is paused (terrain not loaded yet, dead, mounted) the official client
-    // still ends its ticks; keep doing so at tick rate.
+    // still ends its ticks. Do so here as well, every STALL_MS: nothing on the server depends on
+    // the rate, only on a tick end separating two position packets (which beforeWrite guarantees).
     poll () { if (now() - lastEnd >= STALL_MS) end() },
     get sent () { return sent }
   }

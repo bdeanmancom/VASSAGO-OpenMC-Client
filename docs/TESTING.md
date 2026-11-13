@@ -15,7 +15,7 @@ All gameplay tests run against a real [PaperMC](https://papermc.io) server start
 | Authenticated / online mode | `npm run test-server -- --accept-eula --online --flat --port 25571` | Verifies that unauthenticated logins are rejected and reported cleanly. A real Microsoft account is needed to go further. |
 | Other protocol versions | `npm run test-server -- --accept-eula --version 1.21.4` | Any Paper version; pair with `VASSAGO_TEST_VERSION=1.21.4 npm run test:integration`. |
 | Resource-pack prompt | add `--resource-pack <url>` | Makes the server offer a pack so the consent flow can be tested. |
-| Newer server behind ViaBackwards | `npm run test-server -- --accept-eula --version 26.3 --via --port 25572` | Paper 26.3 with the latest ViaVersion + ViaBackwards CI builds. The client joins as 26.1. Paper 26.x needs Java 25; the harness downloads a Temurin JDK 25 into `.test-server/jdk/` when the Java on `PATH` is older. `--build <n>` pins a Paper build, `--plugin <jar or https url>` adds more plugins. |
+| Newer server behind ViaBackwards | `npm run test-server -- --accept-eula --version 26.3 --via --port 25572` | Paper 26.3 with ViaVersion + ViaBackwards. The builds are pinned and checksummed in `scripts/via-pins.json` so every run tests the same jars; `--via-latest` takes the projects' newest CI builds instead (unpinned). The client joins as 26.1. Paper 26.x needs Java 25; the harness downloads a Temurin JDK 25 into `.test-server/jdk/` when the Java on `PATH` is older. `--build <n>` pins a Paper build, `--plugin <jar or https url>` adds more plugins, `--difficulty peaceful` keeps mobs out (the suites start their servers that way). |
 
 ## Suites
 
@@ -23,10 +23,21 @@ All gameplay tests run against a real [PaperMC](https://papermc.io) server start
 |---|---|---|
 | Unit | `npm test` | Mesher (culling, AO, liquids, partial blocks), registry/state decoding, raycast, procedural art coverage for every block and item, config/address parsing, error mapping. |
 | Integration | `MC_EULA=true npm run test:integration` | Drives the headless `GameSession` against Paper in offline and online mode: status ping + version negotiation, login, chunks + light, a 60-second keep-connected run (standing still, walking, jumping, sneaking, placing, breaking), whitelist refusal, resource-pack consent, movement accepted by the server, two players seeing each other, chat, place/break (creative and timed survival digging), inventory moves, 2×2 crafting, containers, damage/death/respawn, dimension change, kick reasons, reconnect, refused/unknown-host/unsupported-version failures. |
-| End-to-end | `xvfb-run -a npm run test:e2e` | Launches the packaged-layout Electron app with Playwright, clicks through the launcher, joins the server, checks rendering, input, chat UI, block interaction, inventory/crafting/chest screens, HUD, death screen, debug overlay, kick + reconnect, diagnostics export. Screenshots land in `tests/e2e/artifacts/`. |
+| End-to-end | `xvfb-run -a npm run test:e2e` | Launches the real Electron app with Playwright (the built source tree, or a packaged build via `VASSAGO_APP_PATH`), clicks through the launcher, joins the server, checks rendering, input, chat UI, block interaction, inventory/crafting/chest screens, HUD, death screen, debug overlay, kick + reconnect, diagnostics export. Screenshots land in `tests/e2e/artifacts/`. |
 
 Set `VASSAGO_TEST_PORT` (and `VASSAGO_TEST_ONLINE_PORT`) to reuse already-running servers instead of
-booting new ones — handy while iterating.
+booting new ones — handy while iterating. Commands the suites send are the vanilla ones, spelled
+`/minecraft:give` and so on, so they keep their meaning on a server where a plugin such as
+EssentialsX replaces `/give`, `/tp` or `/gamemode`.
+
+`VASSAGO_APP_PATH=<path to a packaged executable>` makes the end-to-end suite drive a packaged
+build instead of the source tree; CI does this for the Linux package
+(`release/linux-unpacked/vassago-client`). Without it the suite builds the source tree first, so
+its result always describes the current source (`VASSAGO_E2E_NO_BUILD=1` skips that).
+
+The suites switch a reused server to peaceful difficulty and turn its whitelist off before the
+second test player joins. To soak-test a server that is *meant* to be whitelisted (with
+`VassagoOp` and `VassagoBob` on the list), set `VASSAGO_TEST_KEEP_WHITELIST=1`.
 
 To run every suite against the ViaBackwards profile:
 
@@ -47,8 +58,11 @@ the integration suite.
 
 ## Promoting a version to "verified"
 
+"Verified" means the headless integration suite passes against a real server of that version, in
+CI, on every push. The end-to-end suite additionally runs on 1.21.11 and on the 26.3 + Via profile.
+
 1. `VASSAGO_TEST_VERSION=<version> MC_EULA=true npm run test:integration`
-2. Run the e2e suite against a server of that version.
+2. Add a leg for it to the matrix in `.github/workflows/ci.yml`.
 3. Add the version to `VERIFIED_VERSIONS` in `src/shared/protocol.ts` and record the run in
    `DEVELOPMENT_STATUS.md`.
 

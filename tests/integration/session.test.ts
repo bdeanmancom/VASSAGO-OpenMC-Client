@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest'
 import { FORCED_VERSION, TestClient, sleep } from './harness'
 import { pingServer } from '../../src/session/versions'
 import { createAttemptGate } from '../../src/shared/attempt'
+import { createRequire } from 'node:module'
 
 const port = inject('port')
 const onlinePort = inject('onlinePort')
@@ -24,6 +25,7 @@ describe(`Paper ${version}${FORCED_VERSION ? ` (client forced to ${FORCED_VERSIO
     autoDeclinePack(op)
     await op.joined(port)
     op.vanilla('difficulty peaceful') // no mobs wandering into the tests (matters on a reused server)
+    op.vanilla('whitelist off') // an interrupted earlier run may have left it on
   })
   afterAll(async () => { op.close(); bob.close(); await sleep(300) })
 
@@ -168,7 +170,7 @@ describe(`Paper ${version}${FORCED_VERSION ? ` (client forced to ${FORCED_VERSIO
     await op.until(() => Math.abs(op.pos.x - (px + 0.5)) < 0.01, 10000, 'teleport back')
   })
 
-  it(`stays connected for ${SOAK_SECONDS}s while standing, walking, jumping, sneaking, placing and breaking`, async () => {
+  it(`stays connected for ${SOAK_SECONDS}s while standing, walking, jumping, sneaking, sprinting, placing and breaking`, async () => {
     // Regression test for the 26.3 "Invalid move player packet received" kick: a client that never
     // ends its ticks is disconnected on its second position packet, i.e. within about a second.
     const idle = { forward: false, back: false, left: false, right: false, jump: false, sprint: false, sneak: false }
@@ -191,30 +193,57 @@ describe(`Paper ${version}${FORCED_VERSION ? ` (client forced to ${FORCED_VERSIO
     let rounds = 0
     const tx = px + 3; const tz = pz + 3
     const key = `${tx},${py + 1},${tz}`
-    while (Date.now() < until) {
-      op.send({ t: 'look', yaw: 0, pitch: 0 })
-      op.send({ t: 'controls', c: { ...idle, forward: true } })
-      await sleep(700)
-      op.send({ t: 'controls', c: { ...idle, forward: true, jump: true } })
-      await sleep(600)
-      op.send({ t: 'controls', c: { ...idle, sneak: true, back: true } })
-      await sleep(900)
-      op.send({ t: 'controls', c: { ...idle, sprint: true, left: true, forward: true } })
-      await sleep(400)
-      op.send({ t: 'controls', c: idle })
-      alive('moving')
-      await home()
+    // Movement has to be real, not just commanded: our own position must leave home and rise in a
+    // jump, and the other player's client must be told by the server that we moved and sneaked.
+    const hx = px + 0.5; const hz = pz + 0.5
+    let far = 0; let high = 0
+    const track = setInterval(() => { far = Math.max(far, Math.hypot(op.pos.x - hx, op.pos.z - hz)); high = Math.max(high, op.pos.y - (py + 1)) }, 50)
+    const opAt = (c: TestClient) => [...c.entities.values()].find(e => e.username === 'VassagoOp')
+    await bob.until(() => !!opAt(bob), 15000, 'bob sees op')
+    // sprinting is a flag (0x08) in the entity's shared metadata byte, which the server only sets
+    // when it was told about the sprint in a form it understands
+    let sprintSeen = false
+    const stopWatching = bob.onPacket('entity_metadata', p => {
+      if (p.entityId === opAt(bob)?.id && p.metadata?.some((m: any) => m.key === 0 && (Number(m.value) & 0x08) !== 0)) sprintSeen = true
+    })
+    try {
+      while (Date.now() < until) {
+        far = 0; high = 0; sprintSeen = false
+        const relayed = bob.waitFor('entityMoves', e => e.moves.some(m => m.id === opAt(bob)?.id), 15000)
+        const sneaked = bob.waitFor('entityUpdate', e => e.e.username === 'VassagoOp' && e.e.sneaking === true, 15000)
+        op.send({ t: 'look', yaw: 0, pitch: 0 })
+        op.send({ t: 'controls', c: { ...idle, forward: true } })
+        await sleep(700)
+        op.send({ t: 'controls', c: { ...idle, forward: true, jump: true } })
+        await sleep(600)
+        op.send({ t: 'controls', c: { ...idle, sneak: true, back: true } })
+        await sleep(900)
+        op.send({ t: 'controls', c: { ...idle, sprint: true, left: true, forward: true } })
+        await sleep(400)
+        op.send({ t: 'controls', c: idle })
+        alive('moving')
+        expect(far, 'distance walked from home').toBeGreaterThan(2)
+        expect(high, 'height reached in the jump').toBeGreaterThan(0.9)
+        await relayed
+        await sneaked
+        await bob.until(() => sprintSeen, 5000, 'sprinting seen by the other player')
+        await home()
 
-      op.blocks.delete(key)
-      op.send({ t: 'useBlock', x: tx, y: py, z: tz, face: 1, cx: 0.5, cy: 1, cz: 0.5 })
-      await op.until(() => !!disconnected() || (op.blocks.get(key) ?? 0) !== 0, 10000, 'block placed')
-      alive('placing a block')
-      op.send({ t: 'digStart', x: tx, y: py + 1, z: tz, face: 1 })
-      await op.until(() => !!disconnected() || op.blocks.get(key) === 0, 10000, 'block broken')
-      alive('breaking a block')
-      await sleep(1200) // an idle stretch every round
-      alive('idling')
-      rounds++
+        // placed and broken as seen by the other player, i.e. as the server has it
+        op.blocks.delete(key); bob.blocks.delete(key)
+        op.send({ t: 'useBlock', x: tx, y: py, z: tz, face: 1, cx: 0.5, cy: 1, cz: 0.5 })
+        await bob.until(() => !!disconnected() || (bob.blocks.get(key) ?? 0) !== 0, 10000, 'block placed (seen by the other player)')
+        alive('placing a block')
+        op.send({ t: 'digStart', x: tx, y: py + 1, z: tz, face: 1 })
+        await bob.until(() => !!disconnected() || bob.blocks.get(key) === 0, 10000, 'block broken (seen by the other player)')
+        alive('breaking a block')
+        await sleep(1200) // an idle stretch every round
+        alive('idling')
+        rounds++
+      }
+    } finally {
+      clearInterval(track)
+      stopWatching()
     }
     expect(rounds).toBeGreaterThan(3)
     expect(disconnected()).toBeUndefined()
@@ -327,9 +356,11 @@ describe(`Paper ${version}${FORCED_VERSION ? ` (client forced to ${FORCED_VERSIO
 
   it('reports damage, death and respawns', async () => {
     const hurt = op.waitFor('hurt')
+    const from = op.events.length
     op.chat('/damage VassagoOp 4')
     await hurt
-    await op.until(() => (op.events.filter(e => e.t === 'health').at(-1) as any)?.health <= 16, 5000, 'health dropped')
+    // any report of the lower health counts: on a peaceful server it starts coming back at once
+    await op.until(() => op.events.slice(from).some(e => e.t === 'health' && e.health <= 16), 5000, 'health dropped')
     const death = op.waitFor('death')
     op.chat('/kill VassagoOp')
     await death
@@ -459,12 +490,24 @@ describe('cancelled and replaced connection attempts', () => {
     expect(c.events.filter(e => e.t === 'disconnect').length).toBe(1)
 
     c.events.length = 0
-    c.connect(port) // attempt 2, cancelled and replaced at once by attempt 3
-    c.close()
-    const playing = c.waitFor('phase', e => e.phase === 'playing', 60000)
-    c.connect(port)
-    await playing
-    await sleep(1500)
+    // A revived attempt would not show in the events (they are attributed to the current attempt
+    // only): it would sit on the server as a second, silent connection. So count the connections
+    // the session really opens.
+    const mineflayer = createRequire(import.meta.url)('mineflayer')
+    const createBot = mineflayer.createBot
+    let opened = 0
+    mineflayer.createBot = (...args: unknown[]) => { opened++; return createBot(...args) }
+    try {
+      c.connect(port) // attempt 2, cancelled and replaced at once by attempt 3
+      c.close()
+      const playing = c.waitFor('phase', e => e.phase === 'playing', 60000)
+      c.connect(port)
+      await playing
+      await sleep(1500)
+    } finally {
+      mineflayer.createBot = createBot
+    }
+    expect(opened, 'connections opened for one surviving attempt').toBe(1)
     expect(c.events.filter(e => e.t === 'login').length).toBe(1)
     // only the cancel of attempt 2 shows up; nothing ended attempt 3
     expect(c.events.filter(e => e.t === 'disconnect').length).toBe(1)

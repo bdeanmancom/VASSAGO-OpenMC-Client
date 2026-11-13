@@ -37,6 +37,11 @@ export class SecureStore {
     } catch {}
   }
 
+  /** Every key currently held (in memory or on disk). */
+  keys (): string[] {
+    return [...new Set([...this.memory.keys(), ...Object.keys(this.data)])]
+  }
+
   /** Remove every cached token for an account. */
   forget (username: string): void {
     const prefix = `msa:${username}:`

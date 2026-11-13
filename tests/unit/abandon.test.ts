@@ -83,17 +83,19 @@ describe('what a Microsoft account without a returned profile is told', () => {
   it('reports a missing profile only when the service says 404', async () => {
     expect(await javaAccountState(flow({ items: owned, profile: notFound }))).toEqual({ owns: true, profile: 'missing' })
     expect(await javaAccountState(flow({ items: [], profile: notFound }))).toEqual({ owns: false, profile: 'missing' })
-    expect(await javaAccountState(flow({ items: owned, profile: async () => { throw new Error('429 Too Many Requests') } }))).toEqual({ owns: true, profile: 'unknown' })
+    expect(await javaAccountState(flow({ items: owned, profile: async () => { throw new Error('429 Too Many Requests') } }))).toEqual({ owns: true, profile: 'unanswered' })
     expect(await javaAccountState(flow({ items: owned, profile: async () => ({ id: 'x', name: 'Steve' }) }))).toEqual({ owns: true, profile: 'present' })
-    expect(await javaAccountState(flow({ fail: true }))).toEqual({ owns: null, profile: 'unknown' })
+    expect(await javaAccountState(flow({ fail: true }))).toEqual({ owns: null, profile: 'unanswered' })
     expect(await javaAccountState(null)).toEqual({ owns: null, profile: 'unknown' })
   })
   it('chooses the message from what is actually known', () => {
     expect(describeAccountState({ owns: true, profile: 'missing' })).toMatchObject({ kind: 'ms-profile-missing' })
     expect(describeAccountState({ owns: false, profile: 'missing' })).toMatchObject({ kind: 'ms-not-owned' })
-    // a rate limit or server error is not "you have no player name"
+    // a rate limit or server error is not "you have no player name": it is "try again"
+    expect(describeAccountState({ owns: true, profile: 'unanswered' })).toMatchObject({ kind: 'ms-signin' })
+    expect(describeAccountState({ owns: false, profile: 'unanswered' })).toMatchObject({ kind: 'ms-signin' })
+    // nothing could be asked, or the answers do not add up: keep the neutral wording
     expect(describeAccountState({ owns: true, profile: 'unknown' })).toEqual({})
-    expect(describeAccountState({ owns: false, profile: 'unknown' })).toEqual({})
     expect(describeAccountState({ owns: null, profile: 'missing' })).toEqual({})
     // the profile exists after all: the first request just failed
     expect(describeAccountState({ owns: true, profile: 'present' })).toMatchObject({ kind: 'ms-signin' })

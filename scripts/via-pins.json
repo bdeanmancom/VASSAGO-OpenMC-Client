@@ -1,0 +1,17 @@
+{
+  "comment": "ViaVersion / ViaBackwards builds used by the test harness for '--via'. Pinned and checksummed so every run tests the same jars. To update: pick the builds on modrinth.com, copy url + sha512 from https://api.modrinth.com/v2/version/<id>, run the 26.3 suites, commit.",
+  "plugins": [
+    {
+      "name": "ViaVersion",
+      "version": "5.12.3-SNAPSHOT+1119",
+      "url": "https://cdn.modrinth.com/data/P1OZGk5p/versions/OKm4Zi14/ViaVersion-5.12.3-SNAPSHOT.jar",
+      "sha512": "e664c027cf6172783bfba7119f2663a1a2a5f57a9949128d29fe448d53f3a8b2baa51e44abbabec1eec9c5dd5c192779b0a04cf088f378bcce0ecdab42212f1f"
+    },
+    {
+      "name": "ViaBackwards",
+      "version": "5.12.3-SNAPSHOT+669",
+      "url": "https://cdn.modrinth.com/data/NpvuJQoq/versions/DuSWMuYg/ViaBackwards-5.12.3-SNAPSHOT.jar",
+      "sha512": "85237d797867fb52f4327d68afe624fc80e2ec7625085a8419f98d02ac023723e6b59e85b3163be2d1cfd6fbd8de5ac56bf37b939e726e9279342047bf102ebb"
+    }
+  ]
+}

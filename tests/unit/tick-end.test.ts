@@ -64,13 +64,13 @@ describe('tick-end guard', () => {
     expect(h.wire).toEqual(['flying', 'look', 'chat', 'flying'])
   })
 
-  it('keeps ending ticks at tick rate while the physics loop is paused, and not otherwise', () => {
+  it('keeps ending ticks (every 100 ms) while the physics loop is paused, and not otherwise', () => {
     const h = harness()
     h.guard.onClientTick()
+    const start = h.guard.sent
     for (let i = 0; i < 10; i++) { h.advance(50); h.guard.poll() }
-    const whilePaused = h.guard.sent
-    expect(whilePaused).toBeGreaterThanOrEqual(5)
-    expect(whilePaused).toBeLessThanOrEqual(11)
+    // half a second of silence from the physics loop: one tick end per 100 ms, no more, no fewer
+    expect(h.guard.sent - start).toBe(5)
     // physics running again: the poll must not double up
     const before = h.guard.sent
     for (let i = 0; i < 20; i++) { h.guard.onClientTick(); h.advance(25); h.guard.poll(); h.advance(25) }

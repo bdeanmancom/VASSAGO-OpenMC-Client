@@ -15,8 +15,8 @@ Vassago's own procedural art engine.
 * **Official Account Mode** — Microsoft device-code sign-in for online-mode servers. Ownership is
   checked by Microsoft/Mojang; Vassago never sees your password and never bypasses server authentication.
 * Installers for Windows, macOS (Apple Silicon + Intel) and Linux are attached to the
-  [GitHub Releases](../../releases) of this repository. They are unsigned, and so far only the Linux
-  build has actually been launched and tested. MIT licensed. No telemetry, no ads, no fees.
+  [GitHub Releases](https://github.com/bdeanmancom/VASSAGO-OpenMC-Client/releases) of this repository. They are unsigned; the Linux build is launched
+  and tested by CI, the Windows and macOS builds have not been launched yet. MIT licensed. No telemetry, no ads, no fees.
 
 | | |
 |---|---|
@@ -28,12 +28,13 @@ _Screenshots are captured by the automated end-to-end test (software rendering, 
 
 ## Which servers it can join
 
-| Server | How | Status |
+| Server | How | Checked on every push by |
 |---|---|---|
-| 1.21.4, 1.21.11, 26.1 – 26.1.2 | spoken natively | verified by the automated suites |
-| 26.3 with ViaVersion + ViaBackwards installed | Vassago joins as 26.1, the server translates | verified by the automated suites |
+| 1.21.11 | spoken natively | integration and end-to-end suites |
+| 1.21.4, 26.1 – 26.1.2 | spoken natively | integration suite |
+| 26.3 with ViaVersion + ViaBackwards installed | Vassago joins as 26.1, the server translates | integration suite, two-player soak, end-to-end suite |
 | 26.2 / 26.3 without ViaBackwards | — | not supported yet (the protocol library has no 26.2/26.3 data) |
-| other versions from 1.20.2 to 26.1 | spoken natively | experimental — see [DEVELOPMENT_STATUS.md](DEVELOPMENT_STATUS.md) |
+| other versions from 1.20.2 to 26.1 | spoken natively | nothing — experimental, see [DEVELOPMENT_STATUS.md](DEVELOPMENT_STATUS.md) |
 
 The server list shows this per server, for example “26.3 · joins as 26.1 · verified”. A server is only
 called verified when its status response names one plain version; proxies that advertise a range are
@@ -91,7 +92,8 @@ npm run check-server -- play.example.net
 
 reports, from your own computer, whether the server is reachable, which version it runs and whether
 it accepts private-server (offline-mode) names or asks for a verified account. It only starts a
-login far enough to see how the server answers and never joins.
+login far enough to see how the server answers and never joins (servers older than 1.20.2, where
+that is not possible, are not probed).
 
 * **“This server asks for a verified account”** — the server (or its proxy) is in online mode. That
   is the server's rule; Vassago does not get around it. Sign in with a Microsoft account that owns

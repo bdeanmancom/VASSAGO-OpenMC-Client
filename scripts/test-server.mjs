@@ -6,7 +6,7 @@
 //   node scripts/test-server.mjs --version 26.3 --build 244 --via   (Paper 26.3 + ViaVersion/ViaBackwards)
 //
 // Options: --version <v>  --build <n|latest>  --port <n>  --online  --flat  --seed <s>  --gamemode <m>
-//          --resource-pack <url>  --via (latest ViaVersion + ViaBackwards CI builds)  --plugin <jar path or https url> (repeatable)  --difficulty <peaceful|easy|normal|hard>
+//          --resource-pack <url>  --via (ViaVersion + ViaBackwards, builds pinned in scripts/via-pins.json)  --via-latest (their newest CI builds instead)  --plugin <jar path or https url> (repeatable)  --difficulty <peaceful|easy|normal|hard>
 //          --java <path to a java binary> (or VASSAGO_JAVA). Paper 26.x needs Java 25: when the Java on PATH is
 //          older, a Temurin JDK 25 is downloaded once into .test-server/jdk/.
 //
@@ -38,6 +38,7 @@ export function parseArgs (argv) {
     else if (a === '--resource-pack') out.resourcePack = argv[++i]
     else if (a === '--build') out.build = argv[++i]
     else if (a === '--via') out.via = true
+    else if (a === '--via-latest') out.via = 'latest'
     else if (a === '--plugin') out.plugins.push(argv[++i])
     else if (a === '--java') out.java = argv[++i]
     else if (a === '--difficulty') out.difficulty = argv[++i]
@@ -53,13 +54,16 @@ async function fetchJson (url) {
   return await res.json()
 }
 
-async function download (url, dest, sha256) {
+/** `checksum` is a sha256 hex string, or `{ sha512 }`. */
+async function download (url, dest, checksum) {
   const res = await fetch(url, { headers: UA })
   if (!res.ok) throw new Error(`Download failed (${url}): HTTP ${res.status}`)
   const buf = Buffer.from(await res.arrayBuffer())
-  if (sha256 && createHash('sha256').update(buf).digest('hex') !== sha256) throw new Error(`Checksum mismatch for ${url}`)
-  fs.writeFileSync(dest + '.part', buf)
-  fs.renameSync(dest + '.part', dest)
+  const [algo, want] = checksum && typeof checksum === 'object' ? ['sha512', checksum.sha512] : ['sha256', checksum]
+  if (want && createHash(algo).update(buf).digest('hex') !== want) throw new Error(`Checksum mismatch for ${url}`)
+  const part = `${dest}.${process.pid}.part`
+  fs.writeFileSync(part, buf)
+  fs.renameSync(part, dest)
 }
 
 async function downloadPaper (version, build, dest) {
@@ -68,14 +72,25 @@ async function downloadPaper (version, build, dest) {
   await download(dl.url, dest, dl.checksums.sha256)
 }
 
-/** Latest CI builds of ViaVersion and ViaBackwards (lets older clients join newer servers). */
-async function viaPluginUrls () {
+/**
+ * ViaVersion + ViaBackwards (lets other client versions join). By default the builds pinned in
+ * scripts/via-pins.json, verified by checksum, so every run tests the same jars. `latest` takes
+ * whatever the projects' CI built last instead — unpinned and unverified, for trying a new build.
+ * Returns [{ url, file, checksum }].
+ */
+async function viaPlugins (mode) {
+  if (mode !== 'latest') {
+    const pins = JSON.parse(fs.readFileSync(path.join(root, 'scripts', 'via-pins.json'), 'utf8')).plugins
+    for (const p of pins) console.log(`[test-server] ${p.name} ${p.version} (pinned)`)
+    return pins.map(p => ({ url: p.url, file: `${p.name}-${p.version}.jar`, checksum: { sha512: p.sha512 } }))
+  }
   const out = []
   for (const job of ['ViaVersion', 'ViaBackwards']) {
     const j = await fetchJson(`https://ci.viaversion.com/job/${job}/lastSuccessfulBuild/api/json`)
     const art = j.artifacts.find(x => /^Via\w+-[\w.-]+\.jar$/.test(x.fileName) && !/sources|javadoc/.test(x.fileName))
     if (!art) throw new Error(`No jar artifact found for ${job}`)
-    out.push(`https://ci.viaversion.com/job/${job}/${j.number}/artifact/${art.relativePath}`)
+    console.log(`[test-server] ${job} CI build ${j.number} (latest, not pinned)`)
+    out.push({ url: `https://ci.viaversion.com/job/${job}/${j.number}/artifact/${art.relativePath}`, file: art.fileName.replace(/\.jar$/, `-ci${j.number}.jar`) })
   }
   return out
 }
@@ -92,8 +107,17 @@ export function requiredJava (version) {
   return major >= 26 ? 25 : 21
 }
 
+const javaInFlight = new Map()
+
 /** Find (or download) a Java runtime new enough for the given Paper version. Returns the java binary path. */
-export async function ensureJava (version, preferred) {
+export function ensureJava (version, preferred) {
+  // Two servers are often started together; only one of them may download and unpack the JDK.
+  const key = `${requiredJava(version)}|${preferred ?? ''}`
+  if (!javaInFlight.has(key)) javaInFlight.set(key, provideJava(version, preferred).finally(() => javaInFlight.delete(key)))
+  return javaInFlight.get(key)
+}
+
+async function provideJava (version, preferred) {
   const need = requiredJava(version)
   for (const cand of [preferred, 'java'].filter(Boolean)) {
     if (javaMajor(cand) >= need) return cand
@@ -142,15 +166,14 @@ export async function prepareServer (opts) {
   const pluginDir = path.join(dir, 'plugins')
   fs.mkdirSync(pluginDir, { recursive: true })
   for (const f of fs.readdirSync(pluginDir)) if (f.endsWith('.jar')) fs.rmSync(path.join(pluginDir, f))
-  const wanted = [...(opts.plugins ?? [])]
-  if (opts.via) wanted.push(...await viaPluginUrls())
-  for (const src of wanted) {
-    const name = path.basename(new URL(src, 'file:///').pathname)
-    if (/^https:\/\//.test(src)) {
-      const cached = path.join(cache, name)
-      if (!fs.existsSync(cached)) { console.log(`[test-server] downloading plugin ${name}…`); await download(src, cached) }
-      fs.copyFileSync(cached, path.join(pluginDir, name))
-    } else fs.copyFileSync(path.resolve(src), path.join(pluginDir, name))
+  const wanted = (opts.plugins ?? []).map(src => ({ url: src, file: path.basename(new URL(src, 'file:///').pathname) }))
+  if (opts.via) wanted.push(...await viaPlugins(opts.via))
+  for (const { url, file, checksum } of wanted) {
+    if (/^https:\/\//.test(url)) {
+      const cached = path.join(cache, file)
+      if (!fs.existsSync(cached)) { console.log(`[test-server] downloading plugin ${file}…`); await download(url, cached, checksum) }
+      fs.copyFileSync(cached, path.join(pluginDir, file))
+    } else fs.copyFileSync(path.resolve(url), path.join(pluginDir, file))
   }
   if (!opts.acceptEula) {
     throw new Error('Refusing to start: pass --accept-eula (or MC_EULA=true) to confirm you agree to the Minecraft EULA https://aka.ms/MinecraftEULA')

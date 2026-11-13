@@ -14,6 +14,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { createRequire } from 'node:module'
+import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { startServer, parseArgs } from '../../scripts/test-server.mjs'
 
@@ -52,7 +53,19 @@ async function until (fn, timeout = 15000, what = 'condition') {
 const SERVER_VERSION = process.env.VASSAGO_TEST_VERSION ?? '1.21.11'
 // What the client is expected to speak; differs from the server version behind ViaBackwards.
 const CLIENT_VERSION = process.env.VASSAGO_TEST_CLIENT_VERSION ?? SERVER_VERSION
-const profile = { version: SERVER_VERSION, build: process.env.VASSAGO_TEST_BUILD ?? 'latest', via: process.env.VASSAGO_TEST_VIA === '1' }
+const profile = { version: SERVER_VERSION, build: process.env.VASSAGO_TEST_BUILD ?? 'latest', via: process.env.VASSAGO_TEST_VIA === 'latest' ? 'latest' : process.env.VASSAGO_TEST_VIA === '1' }
+// VASSAGO_APP_PATH=<packaged executable> tests an installed/unpacked build instead of the dev tree.
+const packaged = process.env.VASSAGO_APP_PATH
+if (!packaged && process.env.VASSAGO_E2E_NO_BUILD !== '1') {
+  // The dev tree is launched from dist/. Build it first, so the result always describes the
+  // current source and never an older build that happens to be lying around.
+  console.log('building…')
+  for (const script of [['scripts/gen-blockdata.mjs', '--if-missing'], ['scripts/build.mjs']]) {
+    const r = spawnSync(process.execPath, script, { cwd: root, stdio: ['ignore', 'ignore', 'inherit'] })
+    if (r.status !== 0) { console.error(`build step failed: ${script.join(' ')}`); process.exit(1) }
+  }
+}
+
 let server = null
 let onlineServer = null
 let port = Number(process.env.VASSAGO_TEST_PORT ?? 0)
@@ -68,8 +81,6 @@ if (!onlinePort) {
   onlineServer = await startServer({ ...parseArgs([]), difficulty: 'peaceful', ...profile, port: onlinePort, online: true, levelType: 'minecraft:flat', acceptEula: process.env.MC_EULA === 'true' }, { quiet: true })
 }
 
-// VASSAGO_APP_PATH=<packaged executable> tests an installed/unpacked build instead of the dev tree.
-const packaged = process.env.VASSAGO_APP_PATH
 const args = packaged ? [] : [root]
 if (process.platform === 'linux' && process.getuid?.() === 0) args.push('--no-sandbox')
 const app = await electron.launch({
@@ -153,7 +164,7 @@ try {
     await page.waitForSelector('[data-testid="server-card"] .badge.ok', { timeout: 15000 })
     const text = await page.textContent('[data-testid="server-card"]')
     if (!text.includes(CLIENT_VERSION) || !/verified/.test(text)) throw new Error(`status not shown: ${text}`)
-    if (SERVER_VERSION !== CLIENT_VERSION && !text.includes(`${SERVER_VERSION} · joins as ${CLIENT_VERSION}`)) throw new Error(`translated server not labelled: ${text}`)
+    if (profile.via && SERVER_VERSION !== CLIENT_VERSION && !text.includes(`${SERVER_VERSION} · joins as ${CLIENT_VERSION}`)) throw new Error(`translated server not labelled: ${text}`)
     await sleep(300)
     await shot('05-servers.png')
     return text.replace(/\s+/g, ' ').slice(0, 90)
@@ -211,6 +222,7 @@ try {
     // start from the surface in daylight, wherever the player last logged out
     const p0 = (await until(async () => { const st = await state(); return st?.pos && st.pos.y !== 0 ? st : null }, 30000, 'position')).pos
     await say('/difficulty peaceful') // no mobs wandering into the test (matters on a reused server)
+    await say('/whitelist off') // an interrupted earlier run may have left it on
     await say('/gamemode survival')
     await say('/time set 1000')
     await say('/weather clear')
@@ -380,7 +392,9 @@ try {
   await step('survival HUD: health, hunger, damage feedback, death and respawn', async () => {
     await say('/gamemode survival')
     await page.waitForSelector('[data-testid="hearts"]', { timeout: 8000 })
-    await say('/damage VassagoOp 5')
+    // Enough damage that the drop stays visible for a few seconds: on a peaceful server health
+    // comes back one point a second, and a single lost point could be gone between two looks.
+    await say('/damage VassagoOp 8')
     await until(async () => Number(await page.getAttribute('[data-testid="hearts"]', 'data-health')) <= 15, 8000, 'health drop in HUD')
     await game(() => window.__vassago.game.setLook(0.6, -0.25))
     await sleep(400)

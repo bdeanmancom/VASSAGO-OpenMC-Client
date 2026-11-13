@@ -114,16 +114,26 @@ export function translatedServerVersion (name: unknown, resolved: string | null,
  * protocol (it echoed ours because it translates), speaking its own version is the better choice:
  * no translation layer in between.
  */
-export function negotiate (name: unknown, protocol: number | undefined): { resolved: string | null, serverVersion?: string, confirmed: boolean } {
+export function negotiate (name: unknown, protocol: number | undefined, pinged: number | null = pingProtocol()): { resolved: string | null, serverVersion?: string, confirmed: boolean } {
   const byProtocol = protocol != null ? versionForProtocol(protocol) : null
   const status = readStatusVersion(name, byProtocol, protocol)
   if (status.serverVersion) {
+    // A name that disagrees with the protocol number only means "this server translates" when
+    // that number is an echo of the one we pinged with. Otherwise the name is just words
+    // ("Paper 1.21", "Requires MC 1.21.4") and the protocol number stands.
+    if (protocol !== pinged) return { resolved: byProtocol, serverVersion: undefined, confirmed: false }
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const known = require('minecraft-data').versionsByMinecraftVersion.pc[status.serverVersion]
     const own = known ? versionForProtocol(known.version) : null
     if (own) return { resolved: own, confirmed: true }
   }
   return { resolved: byProtocol, serverVersion: status.serverVersion, confirmed: status.confirmed }
+}
+
+/** The protocol number a status ping is sent with: the protocol library pings as its newest version. */
+export function pingProtocol (): number | null {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  try { return require('minecraft-data')(mc.defaultVersion).version.version } catch { return null }
 }
 
 /** Decide which version to use for a connection. Throws a descriptive error when unsupported. */

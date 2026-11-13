@@ -12,6 +12,7 @@ import { Worker } from 'node:worker_threads'
 import { ConfigStore } from './config-store'
 import { Logger } from './logger'
 import { SecureStore } from './secure-store'
+import { orphanedAccounts } from '../shared/tokens'
 import type { AppInfo } from '../shared/bridge'
 import { VERIFIED_TRANSLATED, VERIFIED_VERSIONS, type PingResult, type SessionCommand } from '../shared/protocol'
 import { parseAddress } from '../shared/config'
@@ -265,6 +266,16 @@ if (!E2E && !app.requestSingleInstanceLock()) {
     config = new ConfigStore(userData)
     secure = new SecureStore(userData)
     logger.log('info', 'main', `Vassago ${app.getVersion()} starting`, { platform: process.platform, arch: process.arch, electron: process.versions.electron })
+    // A stored sign-in belongs to a listed Microsoft account. One that no account lists (its
+    // profile was made for a single attempt and not kept, or the app closed half-way) is forgotten,
+    // so it can never be picked up silently by a later sign-in.
+    try {
+      const listed = config.load().profiles.filter(p => p.auth === 'microsoft').map(p => p.username)
+      for (const account of orphanedAccounts(secure.keys(), listed)) {
+        secure.forget(account)
+        logger.log('info', 'main', 'forgot a stored sign-in that no listed account uses')
+      }
+    } catch (err) { logger.log('warn', 'main', `could not check stored sign-ins: ${String(err)}`) }
     if (process.platform !== 'darwin') Menu.setApplicationMenu(null)
     serveApp()
     registerIpc()

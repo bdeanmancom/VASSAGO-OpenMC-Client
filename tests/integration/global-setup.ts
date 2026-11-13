@@ -9,7 +9,7 @@ export default async function setup ({ provide }: GlobalSetupContext) {
   // Version the client is expected to speak. Differs from the server version when the server
   // admits older clients through ViaVersion/ViaBackwards (VASSAGO_TEST_VIA=1).
   const clientVersion = process.env.VASSAGO_TEST_CLIENT_VERSION ?? version
-  const via = process.env.VASSAGO_TEST_VIA === '1'
+  const via = process.env.VASSAGO_TEST_VIA === 'latest' ? 'latest' : process.env.VASSAGO_TEST_VIA === '1'
   const build = process.env.VASSAGO_TEST_BUILD ?? 'latest'
   const started: any[] = []
   let port = Number(process.env.VASSAGO_TEST_PORT ?? 0)
