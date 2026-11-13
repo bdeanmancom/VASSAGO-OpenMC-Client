@@ -354,6 +354,46 @@ try {
     return `at ${key.join(', ')} via ${locked ? 'real mouse buttons' : 'scripted input'}${clicks > 1 ? ` (${clicks} clicks needed)` : ''}`
   })
 
+  await step('breaking a block by hand: cracks grow, fragments fly, the arm keeps swinging', async () => {
+    // a stone block two blocks east at eye level, in survival, with an empty hand
+    await say('/clear VassagoOp')
+    await say('/gamemode survival')
+    await until(async () => (await state()).gameMode === 'survival', 10000, 'survival mode')
+    const bx = px + 2; const by = py + 2; const bz = pz
+    await say(`/setblock ${bx} ${by} ${bz} minecraft:oak_planks`)
+    await say(`/tp VassagoOp ${px + 0.5} ${py + 1} ${pz + 0.5}`)
+    await sleep(500)
+    await game(() => window.__vassago.game.setLook(-Math.PI / 2, 0))
+    await until(async () => { const t = (await state()).target; return t && t.x === bx && t.y === by && t.z === bz }, 8000, 'target on the block')
+    // hold the dig button the way the input handler does
+    await game(() => { const g = window.__vassago.game; g.leftDown = true; g.primaryAction() })
+    const seen = { stages: new Set(), particles: 0, swings: 0 }
+    let lastSwingAge = 1e9
+    const t0 = Date.now()
+    let shotTaken = false
+    while (Date.now() - t0 < 12000) {
+      const st = await state()
+      if (st.fx.crack >= 0) seen.stages.add(st.fx.crack)
+      seen.particles = Math.max(seen.particles, st.fx.particles)
+      if (st.fx.swingAgeMs < lastSwingAge) seen.swings++
+      lastSwingAge = st.fx.swingAgeMs
+      if (!shotTaken && st.fx.crack >= 4) { await shot('13b-breaking.png'); shotTaken = true }
+      if (await page.evaluate(k => window.__vassago.game.world.getBlock(k[0], k[1], k[2]), [bx, by, bz]) === 0) break
+      await sleep(60)
+    }
+    await game(() => { const g = window.__vassago.game; g.leftDown = false; g.stopDig() })
+    if (await page.evaluate(k => window.__vassago.game.world.getBlock(k[0], k[1], k[2]), [bx, by, bz]) !== 0) throw new Error('the block did not break')
+    const burst = (await state()).fx.particles
+    if (seen.stages.size < 3) throw new Error(`cracks did not progress: stages seen ${[...seen.stages]}`)
+    if (Math.max(...seen.stages) < 5) throw new Error(`cracks stopped early: stages seen ${[...seen.stages]}`)
+    if (seen.particles < 2) throw new Error('no fragments while digging')
+    if (burst < 10 && seen.particles < 10) throw new Error(`no burst of fragments when the block broke (${burst})`)
+    if (seen.swings < 3) throw new Error(`the arm swung only ${seen.swings} time(s) while digging`)
+    await say('/gamemode creative')
+    await until(async () => (await state()).gameMode === 'creative', 10000, 'creative mode')
+    return `crack stages ${[...seen.stages].sort((a, b) => a - b).join(',')}, up to ${Math.max(seen.particles, burst)} fragments, ${seen.swings} swings`
+  })
+
   await step('inventory screen: pick up and move an item, 2×2 crafting', async () => {
     await say('/give VassagoOp minecraft:oak_log 2')
     await until(() => page.evaluate(() => window.__vassago.game.store.get().inventory?.slots.some(s => s?.name === 'oak_log')), 10000, 'logs')

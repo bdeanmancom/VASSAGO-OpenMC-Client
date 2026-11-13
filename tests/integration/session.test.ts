@@ -159,10 +159,20 @@ describe(`Paper ${version}${FORCED_VERSION ? ` (client forced to ${FORCED_VERSIO
     const key = `${tx},${py + 1},${tz}`
     await op.until(() => (op.blocks.get(key) ?? 0) !== 0, 10000, 'dirt placed')
     const started = op.waitFor('dig', e => e.state === 'start')
+    // what the other player is shown: the block cracking under someone else's hand, then breaking
+    const at = (e: { x: number, y: number, z: number }) => e.x === tx && e.y === py + 1 && e.z === tz
+    const cracking = bob.waitFor('breakAnim', e => at(e) && e.stage >= 0, 10000)
+    const broke = bob.waitFor('blockBreak', e => at(e) && e.state !== 0, 10000)
+    const swung = bob.waitFor('entityAnim', e => e.anim === 'swing', 10000)
     op.send({ t: 'digStart', x: tx, y: py + 1, z: tz, face: 5 })
     const dig = await started
     expect(dig.timeMs).toBeGreaterThan(300)
     await op.until(() => op.blocks.get(key) === 0, 10000, 'dirt broken')
+    await cracking
+    await swung
+    expect((await broke).state).toBeGreaterThan(0) // the state of the block that was there
+    // the digger is not sent its own effects: it draws them itself
+    expect(op.events.some(e => e.t === 'breakAnim' && at(e as any))).toBe(false)
     // walk onto the drop (it scatters a little) and pick it up
     op.chat(`/tp VassagoOp ${tx + 0.5} ${py + 1} ${tz + 0.5}`)
     await op.until(() => op.window?.slots.some(s => s?.name === 'dirt') === true, 15000, 'dirt item collected')

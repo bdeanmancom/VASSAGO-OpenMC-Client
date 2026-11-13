@@ -420,6 +420,17 @@ export class GameSession {
     bot.on('diggingCompleted', guard((b: any) => { this.digging = false; this.emit({ t: 'dig', x: b.position.x, y: b.position.y, z: b.position.z, state: 'done', timeMs: 0 }) }))
     bot.on('diggingAborted', guard((b: any) => { this.digging = false; this.emit({ t: 'dig', x: b.position.x, y: b.position.y, z: b.position.z, state: 'cancel', timeMs: 0 }) }))
 
+    // --- other players breaking blocks (our own digging is predicted locally)
+    client.on('block_break_animation', guard((p: any) => {
+      if (!p?.location || p.entityId === bot.entity?.id) return
+      const stage = Number(p.destroyStage)
+      this.emit({ t: 'breakAnim', id: Number(p.entityId) || 0, x: p.location.x, y: p.location.y, z: p.location.z, stage: stage >= 0 && stage <= 9 ? stage : -1 })
+    }))
+    client.on('world_event', guard((p: any) => {
+      // 2001: "block break" — the server tells everyone but the breaker; data is the old block state
+      if (p?.effectId === 2001 && p.location) this.emit({ t: 'blockBreak', x: p.location.x, y: p.location.y, z: p.location.z, state: Number(p.data) || 0 })
+    }))
+
     // --- lifecycle
     // A server (or proxy) that answers a private-server login with an encryption request is asking
     // for account verification. This is the one signal that does not depend on the kick wording or

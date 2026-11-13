@@ -158,6 +158,9 @@ export class Scene {
   private handScene = new THREE.Scene()
   private handCamera = new THREE.PerspectiveCamera(60, 1, 0.05, 10)
   private hand = new THREE.Mesh(new THREE.PlaneGeometry(0.46, 0.46), new THREE.MeshBasicMaterial({ transparent: true, alphaTest: 0.2, side: THREE.DoubleSide }))
+  /** The empty hand: a plain forearm, so a swing is visible without an item too. */
+  private arm = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.62, 0.17), new THREE.MeshBasicMaterial({ color: 0xc99a78 }))
+  private armBase = new THREE.Color(0xc99a78)
   /** Current sky/day brightness 0..1 for entity lighting. */
   dayLight = 1
   ambient = 0.03
@@ -228,6 +231,8 @@ export class Scene {
     this.scene.add(this.clouds)
     this.hand.visible = false
     this.handScene.add(this.hand)
+    this.arm.visible = false
+    this.handScene.add(this.arm)
   }
 
   private celestial (tex: THREE.Texture, size: number): THREE.Mesh {
@@ -333,7 +338,7 @@ export class Scene {
     const r = this.renderer
     r.info.reset() // stats cover the world pass and the hand overlay together
     r.render(this.scene, this.camera)
-    if (this.hand.visible) {
+    if (this.hand.visible || this.arm.visible) {
       r.autoClear = false
       r.clearDepth()
       r.render(this.handScene, this.handCamera)
@@ -345,6 +350,7 @@ export class Scene {
   setHandItem (icon: HTMLCanvasElement | null) {
     const mat = this.hand.material as THREE.MeshBasicMaterial
     mat.map?.dispose()
+    this.arm.visible = !icon
     if (!icon) { mat.map = null; this.hand.visible = false; return }
     const tex = new THREE.CanvasTexture(icon)
     tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestFilter; tex.colorSpace = THREE.NoColorSpace
@@ -355,8 +361,13 @@ export class Scene {
 
   /** Animate the hand: swing 0..1 (0 = idle), bob offset and scene brightness. */
   updateHand (swing: number, bobX: number, bobY: number, brightness: number, equip: number) {
-    if (!this.hand.visible) return
     const s = Math.sin(swing * Math.PI)
+    if (this.arm.visible) {
+      this.arm.position.set(0.62 + bobX - s * 0.28, -0.62 + bobY + s * 0.12 - (1 - equip) * 0.6, -0.95 - s * 0.3)
+      this.arm.rotation.set(-1.05 - s * 0.75, -0.25 + s * 0.35, -0.22)
+      ;(this.arm.material as THREE.MeshBasicMaterial).color.copy(this.armBase).multiplyScalar(Math.max(0.25, brightness))
+    }
+    if (!this.hand.visible) return
     this.hand.position.set(0.66 + bobX - s * 0.3, -0.46 + bobY - s * 0.1 - (1 - equip) * 0.6, -1.1 - s * 0.25)
     this.hand.rotation.set(-0.08 - s * 0.9, -0.38 + s * 0.3, 0.06)
     ;(this.hand.material as THREE.MeshBasicMaterial).color.setScalar(Math.max(0.25, brightness))

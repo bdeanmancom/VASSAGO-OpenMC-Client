@@ -2,7 +2,24 @@
  * Original synthesized sound effects (WebAudio). No sampled or third-party audio is used:
  * every sound is filtered noise or a short oscillator sweep generated at runtime.
  */
+import type { SoundGroup } from './blockfx'
+
 export type Sfx = 'step' | 'break' | 'place' | 'hurt' | 'pop' | 'click' | 'splash'
+
+/** How each material family sounds: a noise band (Hz, sharpness), a body tone (Hz) and its wave. */
+const MATERIAL: Record<SoundGroup, { band: number, q: number, body: number, wave: OscillatorType, ring: number }> = {
+  stone: { band: 1500, q: 1.0, body: 170, wave: 'triangle', ring: 0 },
+  wood: { band: 700, q: 2.2, body: 230, wave: 'triangle', ring: 0 },
+  dirt: { band: 420, q: 0.7, body: 95, wave: 'sine', ring: 0 },
+  grass: { band: 2600, q: 0.6, body: 120, wave: 'sine', ring: 0 },
+  sand: { band: 3200, q: 0.5, body: 0, wave: 'sine', ring: 0 },
+  gravel: { band: 1900, q: 0.5, body: 110, wave: 'triangle', ring: 0 },
+  glass: { band: 5200, q: 3.5, body: 0, wave: 'sine', ring: 2400 },
+  wool: { band: 300, q: 0.6, body: 80, wave: 'sine', ring: 0 },
+  metal: { band: 2400, q: 4.0, body: 320, wave: 'square', ring: 1250 },
+  snow: { band: 1100, q: 0.5, body: 0, wave: 'sine', ring: 0 },
+  leaves: { band: 3800, q: 0.7, body: 0, wave: 'sine', ring: 0 }
+}
 
 export class Audio {
   private ctx: AudioContext | null = null
@@ -71,6 +88,27 @@ export class Audio {
       case 'click': this.tone(880, 660, 0.04, 0.12, 'square'); break
       case 'splash': this.burst(1400, 0.6, 0.35, 0.3, 'bandpass', 0.3); break
     }
+  }
+
+  /** A tool or fist striking a block: short and quiet, in the block's material. */
+  hit (group: SoundGroup) {
+    if (this.volume <= 0) return
+    if (this.master) this.master.gain.value = this.volume
+    const m = MATERIAL[group]
+    this.burst(m.band * (0.9 + Math.random() * 0.2), m.q, 0.07, 0.2, 'bandpass', 0.6)
+    if (m.body) this.tone(m.body * 1.1, m.body * 0.7, 0.06, 0.12, m.wave)
+    if (m.ring) this.tone(m.ring, m.ring * 0.96, 0.09, 0.05)
+  }
+
+  /** The block giving way: the same material, longer and fuller. */
+  breakBlock (group: SoundGroup) {
+    if (this.volume <= 0) return
+    if (this.master) this.master.gain.value = this.volume
+    const m = MATERIAL[group]
+    this.burst(m.band, m.q * 0.7, 0.24, 0.5, 'bandpass', 0.3)
+    this.burst(m.band * 0.45, 0.6, 0.18, 0.3, 'lowpass', 0.4)
+    if (m.body) this.tone(m.body, m.body * 0.4, 0.16, 0.28, m.wave)
+    if (m.ring) { this.tone(m.ring * 1.3, m.ring * 0.8, 0.22, 0.1); this.tone(m.ring * 0.75, m.ring * 0.6, 0.18, 0.07) }
   }
 
   dispose () { void this.ctx?.close(); this.ctx = null }

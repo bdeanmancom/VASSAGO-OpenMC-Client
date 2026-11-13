@@ -2,6 +2,10 @@
  * Game: glue between the session (protocol/gameplay core), the client world,
  * the renderer, input and the HUD store.
  */
+import { CRACK_SIZE, CRACK_STAGES, crackPixels, crackStage, fragmentColors, soundGroup, type RGB3 } from './blockfx'
+import { Particles } from './particles'
+import { tilePixels } from './textures'
+import { FACE_VECTORS } from '../../shared/protocol'
 import { createAttemptGate, newAttemptId } from '../../shared/attempt'
 import * as THREE from 'three'
 import type { ConnectOptions, Controls, SessionCommand, SessionEvent, WindowDTO } from '../../shared/protocol'
@@ -73,7 +77,13 @@ export class Game {
   private crackTextures: THREE.Texture[] = []
   private leftDown = false
   private rightDown = false
-  private dig: { x: number, y: number, z: number, start: number, timeMs: number } | null = null
+  private dig: { x: number, y: number, z: number, face: number, state: number, start: number, timeMs: number } | null = null
+  private particles: Particles | null = null
+  private crackMaterials: THREE.MeshBasicMaterial[] = []
+  /** cracks other players are making, by digging entity */
+  private otherCracks = new Map<number, { mesh: THREE.Mesh, at: number }>()
+  private hitFxAt = 0
+  private hitSoundAt = 0
   private digCooldown = 0
   private lastUse = 0
   private handSwingAt = -1e9
@@ -138,6 +148,9 @@ export class Game {
     this.entities?.clear()
     this.outline?.geometry.dispose()
     for (const t of this.crackTextures) t.dispose()
+    for (const m of this.crackMaterials) m.dispose()
+    this.particles?.dispose()
+    this.otherCracks.clear()
     this.scene?.dispose()
     this.audio.dispose()
     setIconRegistry(null)
@@ -207,26 +220,15 @@ export class Game {
     this.outline.frustumCulled = false
     this.outline.renderOrder = 3
     scene.add(this.outline)
-    for (let stage = 0; stage < 8; stage++) {
-      const cv = document.createElement('canvas'); cv.width = cv.height = 16
-      const g = cv.getContext('2d')!
-      let seed = 1234
-      const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296 }
-      g.fillStyle = 'rgba(10,10,14,0.85)'
-      const cracks = 2 + stage * 2
-      for (let i = 0; i < cracks; i++) {
-        let x = 8 + (rnd() - 0.5) * 4; let y = 8 + (rnd() - 0.5) * 4
-        const ang = rnd() * Math.PI * 2
-        const len = 3 + stage * 0.9
-        for (let k = 0; k < len; k++) {
-          g.fillRect(Math.floor(x), Math.floor(y), 1, 1)
-          x += Math.cos(ang + (rnd() - 0.5) * 1.2); y += Math.sin(ang + (rnd() - 0.5) * 1.2)
-        }
-      }
-      const t = new THREE.CanvasTexture(cv); t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestFilter; t.colorSpace = THREE.NoColorSpace
+    for (let stage = 0; stage < CRACK_STAGES; stage++) {
+      const t = new THREE.DataTexture(new Uint8Array(crackPixels(stage)), CRACK_SIZE, CRACK_SIZE, THREE.RGBAFormat)
+      t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestFilter; t.colorSpace = THREE.NoColorSpace; t.needsUpdate = true
       this.crackTextures.push(t)
+      this.crackMaterials.push(new THREE.MeshBasicMaterial({ map: t, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }))
     }
-    this.crack = new THREE.Mesh(new THREE.BoxGeometry(1.004, 1.004, 1.004), new THREE.MeshBasicMaterial({ map: this.crackTextures[0], transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }))
+    this.particles = new Particles()
+    scene.add(this.particles.points)
+    this.crack = new THREE.Mesh(new THREE.BoxGeometry(1.004, 1.004, 1.004), this.crackMaterials[0])
     this.crack.visible = false
     this.crack.renderOrder = 3
     scene.add(this.crack)
@@ -417,7 +419,7 @@ export class Game {
 
   private startDig (hit: BlockHit) {
     if (this.gameMode === 'adventure' || this.gameMode === 'spectator') return
-    this.dig = { x: hit.x, y: hit.y, z: hit.z, start: performance.now(), timeMs: this.gameMode === 'creative' ? 0 : 1e9 }
+    this.dig = { x: hit.x, y: hit.y, z: hit.z, face: hit.face, state: hit.state, start: performance.now(), timeMs: this.gameMode === 'creative' ? 0 : 1e9 }
     this.send({ t: 'digStart', x: hit.x, y: hit.y, z: hit.z, face: hit.face })
   }
 
@@ -555,9 +557,16 @@ export class Game {
       }
       case 'time': this.env.timeOfDay = ev.timeOfDay; this.env.raining = ev.raining; this.timeAt = now; break
       case 'players': store.set({ players: ev.players }); break
+      case 'breakAnim': this.showOtherCrack(ev.id, ev.x, ev.y, ev.z, ev.stage, now); break
+      case 'blockBreak': this.breakFx(ev.x, ev.y, ev.z, ev.state); break
       case 'dig':
         if (ev.state === 'start') { if (this.dig && this.dig.x === ev.x && this.dig.y === ev.y && this.dig.z === ev.z) { this.dig.timeMs = ev.timeMs; this.dig.start = now } } else {
-          if (ev.state === 'done') { world.setBlock(ev.x, ev.y, ev.z, 0); this.audio.play('break'); this.digCooldown = now + (this.gameMode === 'creative' ? 220 : 280) }
+          if (ev.state === 'done') {
+            const was = this.dig && this.dig.x === ev.x && this.dig.y === ev.y && this.dig.z === ev.z ? this.dig.state : world.getBlock(ev.x, ev.y, ev.z)
+            world.setBlock(ev.x, ev.y, ev.z, 0)
+            this.breakFx(ev.x, ev.y, ev.z, was)
+            this.digCooldown = now + (this.gameMode === 'creative' ? 220 : 280)
+          }
           this.dig = null
           if (this.crack) this.crack.visible = false
           store.set({ digProgress: 0 })
@@ -661,6 +670,7 @@ export class Game {
     scene.updateHand(Math.min(1, Math.max(0, (now - this.handSwingAt) / 260)) % 1, Math.sin(this.bob) * 0.012 * this.bobAmp, -Math.abs(Math.cos(this.bob)) * 0.012 * this.bobAmp, 0.35 + hb * 0.65, Math.min(1, (now - this.handEquipAt) / 180))
 
     this.updateTarget(now)
+    this.particles?.update(dt)
     scene.render()
   }
 
@@ -714,17 +724,83 @@ export class Game {
     if (this.dig && this.crack) {
       const p = this.dig.timeMs > 0 && this.dig.timeMs < 1e8 ? Math.min(1, (now - this.dig.start) / this.dig.timeMs) : 0
       this.store.set({ digProgress: p })
-      if (p > 0.02) {
+      const stage = crackStage(p)
+      if (stage >= 0) {
         this.crack.visible = true
         this.crack.position.set(this.dig.x + 0.5, this.dig.y + 0.5, this.dig.z + 0.5)
-        ;(this.crack.material as THREE.MeshBasicMaterial).map = this.crackTextures[Math.min(7, Math.floor(p * 8))]
+        this.crack.material = this.crackMaterials[stage]
       }
+      // while the button is held: keep swinging, keep chipping, keep knocking
+      if (now - this.handSwingAt > 300) this.handSwingAt = now
+      if (now - this.hitFxAt > 110) {
+        this.hitFxAt = now
+        this.particles?.hit(this.dig.x, this.dig.y, this.dig.z, FACE_VECTORS[this.dig.face] ?? FACE_VECTORS[1], this.fragments(this.dig.state, 2), this.lightAt(this.dig.x, this.dig.y, this.dig.z, this.dig.face))
+      }
+      if (now - this.hitSoundAt > 240) { this.hitSoundAt = now; this.audio.hit(this.groupOf(this.dig.state)) }
     }
+    // other players' cracks disappear if the server stops updating them
+    for (const [id, c] of this.otherCracks) if (now - c.at > 20000) { this.scene?.scene.remove(c.mesh); this.otherCracks.delete(id) }
     // held right button repeats placement
     if (this.rightDown && this.playing && now - this.lastUse > 260) {
       const held = heldItem(this.store.get())
       if (held && this.reg?.blockByName.has(held.name) && this.target) this.secondaryAction()
     }
+  }
+
+  // ------------------------------------------------------ breaking feedback
+
+  private groupOf (state: number) {
+    const reg = this.reg
+    const block = reg ? reg.data.blocks[reg.blockOfState[state]] : null
+    return soundGroup(block?.n ?? 'stone')
+  }
+
+  /** Fragment colours for a block state, taken from the tile on its side. */
+  private fragments (state: number, count: number): RGB3[] {
+    const reg = this.reg
+    if (!reg || state <= 0 || state >= reg.stateCount) return []
+    const key = reg.tileKeys[reg.tiles[state * 6 + 2]] ?? reg.tileKeys[reg.tiles[state * 6 + 1]]
+    if (!key) return []
+    try { return fragmentColors(tilePixels(key), count, (Math.random() * 1e6) | 0) } catch { return [] }
+  }
+
+  /** Brightness (0..1) just outside a block face, the way the world is lit there. */
+  private lightAt (x: number, y: number, z: number, face: number): number {
+    const world = this.world; const scene = this.scene
+    if (!world || !scene) return 1
+    const n = FACE_VECTORS[face] ?? FACE_VECTORS[1]
+    const l = world.getLight(x + n[0], y + n[1], z + n[2])
+    const curve = (v: number) => v / (4 - 3 * v)
+    return scene.ambient + (1 - scene.ambient) * Math.max(curve((l >> 4) / 15) * scene.dayLight, curve((l & 15) / 15))
+  }
+
+  /** A block has just been broken (by us or by someone else): fragments and the break sound. */
+  private breakFx (x: number, y: number, z: number, state: number) {
+    if (!this.reg || state <= 0) return
+    const p = this.scene?.camera.position
+    const far = p ? Math.hypot(x + 0.5 - p.x, y + 0.5 - p.y, z + 0.5 - p.z) : 0
+    if (far > 48) return
+    this.particles?.burst(x, y, z, this.fragments(state, 28), this.lightAt(x, y, z, 1))
+    if (far < 20) this.audio.breakBlock(this.groupOf(state))
+    for (const [id, c] of this.otherCracks) {
+      if (c.mesh.position.x === x + 0.5 && c.mesh.position.y === y + 0.5 && c.mesh.position.z === z + 0.5) { this.scene?.scene.remove(c.mesh); this.otherCracks.delete(id) }
+    }
+  }
+
+  private showOtherCrack (id: number, x: number, y: number, z: number, stage: number, now: number) {
+    const scene = this.scene?.scene
+    if (!scene || this.crackMaterials.length === 0) return
+    let c = this.otherCracks.get(id)
+    if (stage < 0) { if (c) { scene.remove(c.mesh); this.otherCracks.delete(id) } return }
+    if (!c) {
+      c = { mesh: new THREE.Mesh(this.crack!.geometry, this.crackMaterials[0]), at: now }
+      c.mesh.renderOrder = 3
+      scene.add(c.mesh)
+      this.otherCracks.set(id, c)
+    }
+    c.at = now
+    c.mesh.position.set(x + 0.5, y + 0.5, z + 0.5)
+    c.mesh.material = this.crackMaterials[Math.min(CRACK_STAGES - 1, stage)]
   }
 
   private updateDebug () {
@@ -767,6 +843,7 @@ export class Game {
       entities: this.entities?.count ?? 0,
       target: this.target ? { x: this.target.x, y: this.target.y, z: this.target.z, face: this.target.face } : null,
       gameMode: this.gameMode,
+      fx: { particles: this.particles?.count ?? 0, crack: this.crack?.visible ? this.crackMaterials.indexOf(this.crack.material as THREE.MeshBasicMaterial) : -1, otherCracks: this.otherCracks.size, swingAgeMs: Math.round(performance.now() - this.handSwingAt) },
       draw: this.scene ? { calls: this.scene.renderer.info.render.calls, triangles: this.scene.renderer.info.render.triangles } : null
     }
   }

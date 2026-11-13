@@ -1,7 +1,7 @@
 {
   "name": "vassago-client",
   "productName": "Vassago",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Vassago — a free, independent, open-source client compatible with Minecraft: Java Edition servers. Not affiliated with Mojang or Microsoft.",
   "license": "MIT",
   "author": "Vassago Client contributors",

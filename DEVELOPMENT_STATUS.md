@@ -1,10 +1,34 @@
 # Development status
 
-_Last updated: 2026-11-13 · version 0.2.0_
+_Last updated: 2026-11-13 · version 0.2.1_
 
 This file is the honest ledger: what has been **verified by an automated run against a real server**,
 what exists but is only partly verified, and what is missing. If it is not listed under "Verified",
 do not assume it works.
+
+## 0.2.1 in short
+
+Block-breaking feedback: ten crack stages, fragments in the block's colours while hitting and on
+breaking, synthesized hit/break sounds by material, a continuously swinging arm (visible with an
+empty hand too), and the same cracks and fragments for blocks other players break.
+
+How it was checked: unit tests for the crack stages, sound families, fragment colours and the
+particle pool; an integration assertion that a second player is sent the cracking, the arm swing
+and the break effect while the digger is not sent its own; and an end-to-end step that digs a
+block by hand in survival in the real app (all ten stages seen, fragments, repeated swings) on
+Paper 26.3 + Via. **What that does not show:** how it looks and sounds to a person. The sounds
+have never been listened to by the project (the test machines have no audio), the look was judged
+from one software-rendered screenshot, and the material families are assigned by block name, so
+some blocks will sound wrong.
+
+**0.2.0 on the production server.** The server's operators report that 0.2.0 joined their Paper
+26.3 server, completed a login plugin's `/register` and `/login` through chat, moved and broke
+blocks, with no kicks. That is their report, not a run by this project; the two-client,
+ten-minute session from the original acceptance list was not reported.
+
+**Server dialogs are not supported.** The protocol's `show_dialog` (1.21.6+) is ignored, so a
+plugin that asks for a password in a dialog shows nothing; the operators have switched those
+dialogs off for now.
 
 ## 0.2.0 in short
 
@@ -178,6 +202,7 @@ Application
 ## Not implemented
 
 - Native 26.2 / 26.3 protocol
+- Server dialogs (`show_dialog`): notices, confirmations, input forms
 - Applying server resource packs visually (the offer is answered with consent; nothing is downloaded)
 - Biome colouring, particles, weather effects, block-entity rendering (sign text, banner patterns,
   item frames, chest lids), maps, paintings

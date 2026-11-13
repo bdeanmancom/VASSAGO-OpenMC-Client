@@ -112,6 +112,10 @@ export type SessionEvent =
   | { t: 'players', players: PlayerListEntry[] }
   | { t: 'resourcePack', url: string, forced: boolean, prompt?: string }
   | { t: 'dig', x: number, y: number, z: number, state: 'start' | 'done' | 'cancel', timeMs: number }
+  /** Someone else is breaking a block: stage 0..9, or -1 when they stop. `id` is the digging entity. */
+  | { t: 'breakAnim', id: number, x: number, y: number, z: number, stage: number }
+  /** A block was broken by someone else (the server's break effect): `state` is what it was. */
+  | { t: 'blockBreak', x: number, y: number, z: number, state: number }
   /** `engineStopped`: sent by the host when the session itself died, not by a connection attempt. */
   | { t: 'disconnect', reason: string, kicked: boolean, canReconnect: boolean, kind?: DisconnectKind, detail?: string, auth?: AuthMode, engineStopped?: boolean }
   | { t: 'error', message: string }
