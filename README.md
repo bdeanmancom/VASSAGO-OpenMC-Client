@@ -35,7 +35,26 @@ npm ci
 npm start
 ```
 
-Requires Node.js 20+. To try it against a local server:
+Requires Node.js 20+. The first `npm start` also checks that the Electron runtime was downloaded
+and fetches it if not.
+
+<details>
+<summary>Troubleshooting: "Electron failed to install correctly"</summary>
+
+Electron's runtime is downloaded by an npm post-install step. If that step was skipped (for example
+`ignore-scripts` is set, or your package manager blocks dependency install scripts) or the download
+was interrupted, the runtime is missing. `npm start` now repairs this by itself; to do it by hand:
+
+```bash
+node scripts/ensure-electron.mjs
+```
+
+Behind a proxy, set `HTTPS_PROXY`; to use a mirror, set
+`ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/` before running it.
+
+</details>
+
+To try it against a local server:
 
 ```bash
 npm run test-server -- --accept-eula
