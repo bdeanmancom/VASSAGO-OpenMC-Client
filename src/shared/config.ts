@@ -16,6 +16,8 @@ export interface SavedServer {
   /** preferred profile id, optional */
   profileId?: string
   lastPlayed?: number
+  /** set when the server last turned away a private-server name because it runs in online mode */
+  requiresAccount?: boolean
 }
 
 export interface RecentConnection { host: string, port: number, name: string, at: number, profileId: string, version?: string }
@@ -132,7 +134,7 @@ export function sanitizeConfig (raw: unknown): AppConfig {
     id: p.id, name: String(p.name ?? p.username), username: p.username, auth: (p.auth === 'microsoft' ? 'microsoft' : 'offline') as AuthMode
   })) : []
   const servers = Array.isArray(r.servers) ? r.servers.filter(s => s && typeof s.host === 'string' && Number.isInteger(s.port)).map(s => ({
-    id: String(s.id), name: String(s.name ?? s.host), host: s.host, port: s.port, profileId: s.profileId, lastPlayed: s.lastPlayed
+    id: String(s.id), name: String(s.name ?? s.host), host: s.host, port: s.port, profileId: s.profileId, lastPlayed: s.lastPlayed, ...(s.requiresAccount === true ? { requiresAccount: true } : {})
   })) : []
   const settings = { ...DEFAULT_SETTINGS }
   if (r.settings && typeof r.settings === 'object') {

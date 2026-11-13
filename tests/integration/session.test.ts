@@ -317,6 +317,7 @@ describe(`Paper ${version} — offline-mode server`, () => {
     op.chat('/kick VassagoBob integration test kick')
     const ev = await dc
     expect(ev.kicked).toBe(true)
+    expect(ev.kind).toBe('kicked')
     expect(ev.reason).toContain('integration test kick')
   })
 
@@ -357,7 +358,9 @@ describe('connection failures', () => {
     const c = new TestClient('Nobody')
     const dc = c.waitFor('disconnect')
     c.connect(1) // nothing listens on port 1
-    expect((await dc).reason).toMatch(/refused/i)
+    const ev = await dc
+    expect(ev.reason).toMatch(/refused/i)
+    expect(ev.kind).toBe('network')
   })
 
   it('reports an unknown host cleanly', async () => {
@@ -388,7 +391,12 @@ describe(`Paper ${version} — online-mode server`, () => {
     c.connect(onlinePort)
     const ev = await dc
     expect(c.events.some(e => e.t === 'login')).toBe(false)
-    expect(ev.reason.length).toBeGreaterThan(0)
+    expect(c.events.some(e => e.t === 'msaCode')).toBe(false) // a private-server profile never triggers Microsoft sign-in
+    expect(ev.kind).toBe('auth-required')
+    expect(ev.kicked).toBe(true)
+    expect(ev.auth).toBe('offline')
+    expect(ev.reason).toMatch(/online mode/)
+    expect(ev.detail).toMatch(/verify username/i)
     console.log('online-mode rejection reason:', ev.reason)
   })
 })

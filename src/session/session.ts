@@ -12,7 +12,7 @@ import type {
 } from '../shared/protocol'
 import { FACE_VECTORS } from '../shared/protocol'
 import { resolveVersion } from './versions'
-import { describeDisconnect } from './errors'
+import { classifyError, classifyKick, type Classified } from './errors'
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const mineflayer = require('mineflayer')
@@ -49,7 +49,9 @@ export class GameSession {
   private sequence = 0
   private loggedIn = false
   private pendingPacks: { uuid?: string, hash?: string }[] = []
-  private lastReason: { reason: string, kicked: boolean } | null = null
+  private lastReason: (Classified & { kicked: boolean }) | null = null
+  /** true while a failed Microsoft sign-in is being examined; the final disconnect is sent afterwards */
+  private diagnosing = false
   private chatMessage: any = null
   private spawned = false
   private chatMessageFor: any = null
@@ -116,7 +118,7 @@ export class GameSession {
     try {
       version = await resolveVersion(opts.host, opts.port, opts.version)
     } catch (err: any) {
-      this.finish(describeDisconnect(err), false)
+      this.finish(classifyError(err, opts.auth), false)
       return
     }
     if (this.ended) return
@@ -149,15 +151,15 @@ export class GameSession {
     try {
       bot = mineflayer.createBot(botOptions)
     } catch (err: any) {
-      this.finish(describeDisconnect(err), false)
+      this.finish(classifyError(err, opts.auth), false)
       return
     }
     this.bot = bot
     this.connectTimer = setTimeout(() => {
       if (!this.loggedIn && opts.auth !== 'microsoft') {
-        this.lastReason = { reason: 'Connection timed out — the server did not respond in time.', kicked: false }
+        this.lastReason = { kind: 'network', reason: 'Connection timed out — the server did not respond in time.', kicked: false }
         try { bot.end('timeout') } catch {}
-        this.finish(this.lastReason.reason, false)
+        this.finish(this.lastReason, false)
       }
     }, CONNECT_TIMEOUT_MS)
     this.wire(bot)
@@ -323,34 +325,66 @@ export class GameSession {
 
     // --- lifecycle
     bot.on('kicked', guard((reason: any) => {
-      this.lastReason = { reason: this.text(reason) || 'Kicked by server', kicked: true }
+      this.lastReason = { ...classifyKick(reason, this.text(reason)), kicked: true }
     }))
     bot.on('error', guard((err: any) => {
       this.log('warn', `connection error: ${err?.message ?? err}`)
-      if (!this.lastReason) this.lastReason = { reason: describeDisconnect(err), kicked: false }
-      if (!this.loggedIn) { this.finish(this.lastReason.reason, false) }
+      if (!this.lastReason) this.lastReason = { ...classifyError(err, this.opts?.auth ?? 'offline'), kicked: false }
+      if (!this.loggedIn) {
+        if (this.lastReason.kind === 'ms-no-java-profile') void this.finishAfterLicenceCheck(bot, this.lastReason)
+        else this.finish(this.lastReason, this.lastReason.kicked)
+      }
     }))
     bot.on('end', guard((why: string) => {
-      const r = this.lastReason ?? { reason: describeDisconnect(why), kicked: false }
-      this.finish(r.reason, r.kicked)
+      if (this.diagnosing) return
+      const r = this.lastReason ?? { ...classifyError(why, this.opts?.auth ?? 'offline'), kicked: false }
+      this.finish(r, r.kicked)
     }))
   }
 
-  private finish (reason: string, kicked: boolean) {
+  /**
+   * Microsoft sign-in succeeded but no Java Edition profile came back. Ask the licence list (with the
+   * token we already hold — no new sign-in) whether the account owns the game at all, so the message
+   * can say which of the two situations it is. Falls back to the neutral wording on any doubt.
+   */
+  private async finishAfterLicenceCheck (bot: any, base: Classified & { kicked: boolean }) {
+    if (this.diagnosing) return
+    this.diagnosing = true
+    let result: Classified = base
+    try {
+      const owns = await Promise.race([
+        javaLicenceState(bot?._client?.authflow),
+        new Promise<null>(resolve => setTimeout(() => resolve(null), 8000))
+      ])
+      if (owns === false) {
+        result = { ...base, kind: 'ms-not-owned', reason: 'You are signed in to Microsoft, but the licences on this account do not include Minecraft: Java Edition.' }
+      } else if (owns === true) {
+        result = { ...base, kind: 'ms-profile-missing', reason: 'This Microsoft account owns Minecraft: Java Edition but has not created its player name yet. Start the official launcher once (or set the name at minecraft.net), then try again.' }
+      }
+    } catch (err: any) {
+      this.log('debug', `licence check failed: ${err?.message ?? err}`)
+    } finally {
+      this.diagnosing = false
+    }
+    if (this.bot === bot) this.finish(result, false)
+  }
+
+  private finish (why: Classified, kicked: boolean) {
     if (this.ended) return
     this.ended = true
     const wasBot = this.bot
+    const auth = this.opts?.auth
     this.teardown()
     if (wasBot) { try { wasBot.end() } catch {} }
-    this.emit({ t: 'disconnect', reason, kicked, canReconnect: !!this.opts })
-    this.emit({ t: 'phase', phase: 'disconnected', detail: reason })
+    this.emit({ t: 'disconnect', reason: why.reason, kicked, canReconnect: !!this.opts, kind: why.kind, detail: why.detail !== why.reason ? why.detail : undefined, auth })
+    this.emit({ t: 'phase', phase: 'disconnected', detail: why.reason })
   }
 
   disconnect (reason: string) {
     if (this.ended) return
-    this.lastReason = { reason, kicked: false }
+    this.lastReason = { kind: 'other', reason, kicked: false }
     const bot = this.bot
-    this.finish(reason, false)
+    this.finish(this.lastReason, false)
     try { bot?.quit?.(reason) } catch {}
   }
 
@@ -367,6 +401,7 @@ export class GameSession {
     this.pendingLight.clear()
     this.flying = false
     this.digging = false
+    this.diagnosing = false
     this.pendingPacks = []
     if (bot) {
       try { bot.removeAllListeners() } catch {}
@@ -714,6 +749,22 @@ export class GameSession {
       uuid: p.uuid, username: p.username, ping: p.ping ?? 0, gamemode: p.gamemode ?? 0
     }))
     this.emit({ t: 'players', players })
+  }
+}
+
+/**
+ * Does the signed-in account's licence list include Java Edition?
+ * true / false when Microsoft's answer is clear, null when it is not (network error, unexpected shape).
+ */
+export async function javaLicenceState (authflow: any): Promise<boolean | null> {
+  if (!authflow || typeof authflow.getMinecraftJavaToken !== 'function') return null
+  try {
+    const res = await authflow.getMinecraftJavaToken({ fetchEntitlements: true })
+    const items = res?.entitlements?.items
+    if (!Array.isArray(items)) return null
+    return items.some((i: any) => typeof i?.name === 'string' && /^(product_minecraft|game_minecraft)$/.test(i.name))
+  } catch {
+    return null
   }
 }
 

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AppInfo } from '../../shared/bridge'
 import { PRESETS, isValidUsername, type AppConfig, type Profile, type SavedServer, type Settings } from '../../shared/config'
-import type { ConnectOptions, PingResult } from '../../shared/protocol'
+import type { AuthMode, ConnectOptions, DisconnectKind, PingResult } from '../../shared/protocol'
 import { Icon, Logo, Modal } from './components'
 import { AboutPage, DirectPage, PlayPage, ProfilesPage, ServersPage, SettingsPage } from './pages'
 import { GameView } from './GameView'
@@ -116,7 +116,10 @@ export function App () {
     update(c => ({
       ...c,
       recents: [{ host: target.host, port: target.port, name: target.name, at: Date.now(), profileId }, ...c.recents.filter(r => addrKey(r.host, r.port) !== addrKey(target.host, target.port))].slice(0, 6),
-      servers: c.servers.map(s => addrKey(s.host, s.port) === addrKey(target.host, target.port) ? { ...s, lastPlayed: Date.now() } : s)
+      // a successful join with a private-server profile proves the server no longer demands accounts
+      servers: c.servers.map(s => addrKey(s.host, s.port) === addrKey(target.host, target.port)
+        ? { ...s, lastPlayed: Date.now(), requiresAccount: c.profiles.find(p => p.id === profileId)?.auth === 'offline' ? false : s.requiresAccount }
+        : s)
     }))
   }, [update])
 
@@ -128,6 +131,35 @@ export function App () {
     if (p.auth === 'offline' && !config.settings.acceptedOfflineWarning) { setPendingOffline({ target, profile: p }); return }
     start(target, p)
   }, [config, activeProfile, start, toast])
+
+  /** From a disconnect screen: connect to the same server again as a different kind of profile. */
+  const retryAs = useCallback((mode: AuthMode, fresh = false) => {
+    if (!config || !game) return
+    const target = game.target
+    let profile = activeProfile?.auth === mode ? activeProfile : config.profiles.find(p => p.auth === mode && (mode === 'microsoft' || isValidUsername(p.username)))
+    if (!profile) {
+      profile = mode === 'offline'
+        ? { id: newId(), name: 'Player', username: 'Player', auth: 'offline' }
+        : { id: newId(), name: 'Microsoft account', username: 'Microsoft account', auth: 'microsoft' }
+    }
+    const chosen = profile
+    update(c => ({ ...c, profiles: c.profiles.some(p => p.id === chosen.id) ? c.profiles : [...c.profiles, chosen], activeProfileId: chosen.id }))
+    const go = () => {
+      setGame(null)
+      if (chosen.auth === 'offline' && !config.settings.acceptedOfflineWarning) setPendingOffline({ target, profile: chosen })
+      else start(target, chosen)
+    }
+    if (fresh && mode === 'microsoft') void window.vassago.app.signOut(chosen.username).then(go, go)
+    else go()
+  }, [config, game, activeProfile, update, start])
+
+  /** Remember whether a server turned away unverified names, so the launcher can say so up front. */
+  const recordOutcome = useCallback((target: Target, kind: DisconnectKind | undefined) => {
+    if (kind !== 'auth-required') return
+    update(c => c.servers.some(s => addrKey(s.host, s.port) === addrKey(target.host, target.port) && !s.requiresAccount)
+      ? { ...c, servers: c.servers.map(s => addrKey(s.host, s.port) === addrKey(target.host, target.port) ? { ...s, requiresAccount: true } : s) }
+      : c)
+  }, [update])
 
   if (!config || !activeProfile) return <div className="boot"><Logo size={72} /><div className="boot-bar" /></div>
 
@@ -145,6 +177,8 @@ export function App () {
             onJoined={() => recordJoin(game.target, game.profileId)}
             onExit={() => setGame(null)}
             onReconnect={() => setGame(g => g ? { ...g, key: Date.now() } : g)}
+            onRetryAs={retryAs}
+            onOutcome={kind => recordOutcome(game.target, kind)}
           />
         : (
           <div className="shell">

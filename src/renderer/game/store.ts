@@ -1,6 +1,6 @@
 /** Tiny observable store that feeds the React HUD from the game loop. */
 import { useSyncExternalStore } from 'react'
-import type { ItemDTO, PlayerListEntry, SessionPhase, WindowDTO } from '../../shared/protocol'
+import type { AuthMode, DisconnectKind, ItemDTO, PlayerListEntry, SessionPhase, WindowDTO } from '../../shared/protocol'
 
 export interface ChatLine { id: number, motd: string, time: number }
 
@@ -34,7 +34,7 @@ export interface HudState {
   fps: number
   resourcePack: { url: string, forced: boolean, prompt?: string } | null
   msaCode: { userCode: string, verificationUri: string } | null
-  disconnect: { reason: string, kicked: boolean } | null
+  disconnect: { reason: string, kicked: boolean, kind?: DisconnectKind, detail?: string, auth?: AuthMode } | null
   hurtAt: number
   digProgress: number
   target: string

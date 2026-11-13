@@ -472,7 +472,7 @@ export class Game {
       case 'msaCode': store.set({ msaCode: { userCode: ev.userCode, verificationUri: ev.verificationUri } }); return
       case 'disconnect':
         if (document.pointerLockElement === this.canvas) document.exitPointerLock()
-        store.set({ disconnect: { reason: ev.reason, kicked: ev.kicked }, screen: 'none', resourcePack: null, msaCode: null })
+        store.set({ disconnect: { reason: ev.reason, kicked: ev.kicked, kind: ev.kind, detail: ev.detail, auth: ev.auth }, screen: 'none', resourcePack: null, msaCode: null })
         return
       case 'resourcePack': store.set({ resourcePack: { url: ev.url, forced: ev.forced, prompt: ev.prompt } }); return
       case 'log': return

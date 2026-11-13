@@ -67,6 +67,19 @@ export interface WindowDTO {
 
 export interface PlayerListEntry { uuid: string, username: string, ping: number, gamemode: number, displayName?: string }
 
+/**
+ * Why a connection ended, in terms the UI can act on.
+ *  auth-required       the server is in online mode and refused an unverified (private-server) name
+ *  ms-no-java-profile  Microsoft sign-in worked, but the account has no Java Edition profile (ownership not determined)
+ *  ms-not-owned        Microsoft sign-in worked; the account's licences do not include Java Edition
+ *  ms-profile-missing  the account owns Java Edition but has never created its profile name
+ *  ms-xbox             the Xbox Live step refused the account (no Xbox profile, child account, region, ban)
+ *  ms-signin           sign-in was not completed or the saved sign-in is no longer valid
+ */
+export type DisconnectKind =
+  | 'auth-required' | 'ms-no-java-profile' | 'ms-not-owned' | 'ms-profile-missing' | 'ms-xbox' | 'ms-signin'
+  | 'whitelist' | 'banned' | 'full' | 'version' | 'proxy' | 'network' | 'kicked' | 'other'
+
 export type SessionPhase = 'idle' | 'authenticating' | 'connecting' | 'login' | 'loading' | 'playing' | 'disconnected'
 
 export type SessionEvent =
@@ -98,7 +111,7 @@ export type SessionEvent =
   | { t: 'players', players: PlayerListEntry[] }
   | { t: 'resourcePack', url: string, forced: boolean, prompt?: string }
   | { t: 'dig', x: number, y: number, z: number, state: 'start' | 'done' | 'cancel', timeMs: number }
-  | { t: 'disconnect', reason: string, kicked: boolean, canReconnect: boolean }
+  | { t: 'disconnect', reason: string, kicked: boolean, canReconnect: boolean, kind?: DisconnectKind, detail?: string, auth?: AuthMode }
   | { t: 'error', message: string }
   | { t: 'log', level: 'debug' | 'info' | 'warn' | 'error', msg: string, data?: unknown }
 

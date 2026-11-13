@@ -1,12 +1,13 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as RMouseEvent } from 'react'
 import type { Settings } from '../../shared/config'
-import type { ConnectOptions, ItemDTO, WindowDTO } from '../../shared/protocol'
+import type { AuthMode, ConnectOptions, DisconnectKind, ItemDTO, WindowDTO } from '../../shared/protocol'
 import { Game } from '../game/game'
 import { Store, initialHud, useStore, type HudState } from '../game/store'
 import { itemIconUrl } from '../game/icons'
 import { Icon, Logo, Modal, MotdText } from './components'
 import { SettingsBody } from './pages'
 import type { Target } from './App'
+import { Disconnected } from './Disconnected'
 
 interface Props {
   opts: ConnectOptions
@@ -16,9 +17,13 @@ interface Props {
   onJoined: () => void
   onExit: () => void
   onReconnect: () => void
+  /** Connect again as a different kind of profile (optionally signing the Microsoft account out first). */
+  onRetryAs: (mode: AuthMode, fresh?: boolean) => void
+  /** Reports why a connection ended, so the launcher can remember what a server requires. */
+  onOutcome: (kind: DisconnectKind | undefined) => void
 }
 
-export function GameView ({ opts, target, settings, setSettings, onJoined, onExit, onReconnect }: Props) {
+export function GameView ({ opts, target, settings, setSettings, onJoined, onExit, onReconnect, onRetryAs, onOutcome }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const store = useMemo(() => new Store<HudState>(initialHud()), [])
   const gameRef = useRef<Game | null>(null)
@@ -45,6 +50,9 @@ export function GameView ({ opts, target, settings, setSettings, onJoined, onExi
   const msa = useStore(store, s => s.msaCode)
   const inWorld = phase === 'playing' && worldReady && !disconnect
   const joined = useRef(false)
+  const reported = useRef(false)
+  useEffect(() => { if (disconnect && !reported.current) { reported.current = true; onOutcome(disconnect.kind) } // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [disconnect])
   useEffect(() => { if (phase === 'playing' && !joined.current) { joined.current = true; onJoined() } // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase])
 
@@ -81,13 +89,19 @@ export function GameView ({ opts, target, settings, setSettings, onJoined, onExi
           </div>
         </div>
       )}
-      {!inWorld && !disconnect && <LoadingScreen store={store} target={target} onCancel={onExit} />}
+      {!inWorld && !disconnect && <LoadingScreen store={store} target={target} opts={opts} onCancel={onExit} />}
       {msa && !disconnect && (
-        <Modal title="Sign in with Microsoft" actions={<button className="btn ghost" onClick={onExit}>Cancel</button>}>
-          <p>To verify your account, open the Microsoft sign-in page in your browser and enter this code:</p>
+        <Modal
+          title="Sign in with Microsoft"
+          actions={<>
+            <button className="btn ghost" data-testid="msa-use-offline" onClick={() => onRetryAs('offline')}>Use a private-server profile instead</button>
+            <button className="btn ghost" onClick={onExit}>Cancel</button>
+          </>}
+        >
+          <p>You are connecting with the Microsoft-account profile <b>{opts.username}</b>, so Vassago verifies that account before joining. Open the Microsoft sign-in page in your browser and enter this code:</p>
           <div className="msa-code" data-testid="msa-code">{msa.userCode}</div>
           <button className="btn primary" onClick={() => { void window.vassago.app.openExternal(msa.verificationUri) }}>Open {msa.verificationUri.replace(/^https:\/\//, '')}</button>
-          <p className="muted">Vassago never sees your password. This window continues automatically once you finish signing in.</p>
+          <p className="muted">Vassago never sees your password. This window continues automatically once you finish signing in. A Microsoft account is only needed for servers running in online mode — for your own offline-mode server, use a private-server profile.</p>
         </Modal>
       )}
       {pack && !disconnect && (
@@ -105,24 +119,21 @@ export function GameView ({ opts, target, settings, setSettings, onJoined, onExi
         </Modal>
       )}
       {disconnect && (
-        <div className="overlay solid">
-          <div className="disconnect-card" data-testid="disconnected">
-            <div className={`dc-icon ${disconnect.kicked ? 'kick' : ''}`}><Icon name={disconnect.kicked ? 'warn' : 'x'} size={30} /></div>
-            <h2>{disconnect.kicked ? 'Disconnected by server' : phase === 'playing' || worldReady ? 'Connection lost' : 'Couldn’t connect'}</h2>
-            <p className="dc-reason" data-testid="disconnect-reason">{disconnect.reason}</p>
-            <div className="dc-server">{target.name} · {opts.host}{opts.port !== 25565 ? `:${opts.port}` : ''}</div>
-            <div className="dc-actions">
-              <button className="btn primary big" data-testid="reconnect" onClick={onReconnect}><Icon name="refresh" />Reconnect</button>
-              <button className="btn big" data-testid="back-to-menu" onClick={onExit}>Back to menu</button>
-            </div>
-          </div>
-        </div>
+        <Disconnected
+          info={disconnect}
+          target={target}
+          opts={opts}
+          wasInWorld={phase === 'playing' || worldReady}
+          onReconnect={onReconnect}
+          onExit={onExit}
+          onRetryAs={onRetryAs}
+        />
       )}
     </div>
   )
 }
 
-function LoadingScreen ({ store, target, onCancel }: { store: Store<HudState>, target: Target, onCancel: () => void }) {
+function LoadingScreen ({ store, target, opts, onCancel }: { store: Store<HudState>, target: Target, opts: ConnectOptions, onCancel: () => void }) {
   const phase = useStore(store, s => s.phase)
   const detail = useStore(store, s => s.phaseDetail)
   const steps = ['Connecting', 'Logging in', 'Loading terrain', 'Building world']
@@ -133,6 +144,7 @@ function LoadingScreen ({ store, target, onCancel }: { store: Store<HudState>, t
         <Logo size={64} />
         <h2>{phase === 'authenticating' ? 'Signing in' : steps[idx]}…</h2>
         <div className="loading-server">{target.name}</div>
+        <div className="loading-identity" data-testid="loading-identity">as {opts.username} · {opts.auth === 'microsoft' ? 'Microsoft account' : 'private-server profile (no account check)'}</div>
         <div className="loading-steps">{steps.map((s, i) => <span key={s} className={i < idx ? 'done' : i === idx ? 'now' : ''} />)}</div>
         <div className="loading-detail">{idx === 3 ? 'Meshing chunks around you' : detail}</div>
         <button className="btn ghost" onClick={onCancel}>Cancel</button>

@@ -2,7 +2,7 @@
   "name": "vassago-client",
   "productName": "Vassago",
   "version": "0.1.0",
-  "description": "Vassago — a free, independent, open-source client compatible with Minecraft: Java Edition servers. Not affiliated with Mojang or Microsoft.",
+  "description": "Vassago \u2014 a free, independent, open-source client compatible with Minecraft: Java Edition servers. Not affiliated with Mojang or Microsoft.",
   "license": "MIT",
   "author": "Vassago Client contributors",
   "homepage": "https://github.com/bdeanmancom/VASSAGO-OpenMC-Client",
@@ -26,7 +26,8 @@
     "make:icon": "node scripts/make-icon.mjs",
     "pack:dir": "npm run build && electron-builder --dir --publish never",
     "pretest": "node scripts/gen-blockdata.mjs --if-missing",
-    "pretypecheck": "node scripts/gen-blockdata.mjs --if-missing"
+    "pretypecheck": "node scripts/gen-blockdata.mjs --if-missing",
+    "check-server": "node scripts/check-server.mjs"
   },
   "dependencies": {
     "minecraft-data": "^3.119.0",
@@ -54,7 +55,7 @@
   "build": {
     "appId": "live.vassago.client",
     "productName": "Vassago",
-    "copyright": "Copyright © 2026 Vassago Client contributors (MIT License)",
+    "copyright": "Copyright \u00a9 2026 Vassago Client contributors (MIT License)",
     "asar": false,
     "directories": {
       "output": "release",

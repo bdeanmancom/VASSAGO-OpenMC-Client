@@ -170,7 +170,7 @@ export function ServersPage ({ ctx }: { ctx: AppCtx }) {
                 <div key={s.id} className="server-card" data-testid="server-card">
                   <ServerIcon ping={p} name={s.name} />
                   <div className="server-main">
-                    <div className="server-title"><span className="server-name">{s.name}</span><VersionBadge ping={p} /></div>
+                    <div className="server-title"><span className="server-name">{s.name}</span><VersionBadge ping={p} />{s.requiresAccount && <span className="badge warn" data-testid="requires-account" title="Last time, this server refused a private-server name because it runs in online mode. It needs a Microsoft account that owns the game — or, if it is your server, online mode turned off.">verified accounts only</span>}</div>
                     <div className="server-motd">{online && p.motd ? <MotdText text={p.motd.split('\n').slice(0, 2).join('  ')} /> : <span className="muted">{p === 'loading' || !p ? 'Pinging…' : `Can’t reach server${p.error ? ` (${p.error})` : ''}`}</span>}</div>
                     <div className="server-addr">{addrLabel(s.host, s.port)}{s.lastPlayed ? ` · played ${timeAgo(s.lastPlayed)}` : ''}</div>
                   </div>
@@ -299,7 +299,7 @@ export function ProfilesPage ({ ctx }: { ctx: AppCtx }) {
         <div><h1>Profiles</h1><p className="sub">Who you play as. Two clearly separate modes: private-server names and verified Microsoft accounts.</p></div>
         <div className="head-actions">
           <button className="btn" data-testid="add-offline" onClick={() => { setAdding('offline'); setUsername('') }}><Icon name="user" />Private server profile</button>
-          <button className="btn primary" onClick={() => { setAdding('microsoft'); setUsername('') }}><Icon name="ms" />Microsoft account</button>
+          <button className="btn" data-testid="add-microsoft" onClick={() => { setAdding('microsoft'); setUsername('') }}><Icon name="ms" />Microsoft account</button>
         </div>
       </header>
       <div className="profile-list">
