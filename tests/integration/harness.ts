@@ -51,9 +51,17 @@ export class TestClient {
   }
 
   async joined (port: number, extra: Partial<ConnectOptions> = {}) {
+    const from = this.events.length
     const playing = this.waitFor('phase', e => e.phase === 'playing', 60000)
     this.connect(port, extra)
     await playing
+    // A previous (aborted) run may have left this player dead on the server.
+    await sleep(300)
+    if (this.events.slice(from).some(e => e.t === 'death')) {
+      const alive = this.waitFor('health', e => e.health > 0, 20000)
+      this.send({ t: 'respawn' })
+      await alive
+    }
     await this.until(() => this.chunks.size >= 9, 60000, 'chunks')
     await this.until(() => this.pos.onGround, 30000, 'landing')
   }

@@ -133,4 +133,20 @@ export const FACE_VECTORS: readonly (readonly [number, number, number])[] = [
 ]
 
 /** Versions that have passed the integration suite against a real server. */
-export const VERIFIED_VERSIONS: readonly string[] = ['1.21.11']
+export const VERIFIED_VERSIONS: readonly string[] = ['1.21.4', '1.21.11']
+
+export interface PingResult {
+  online: boolean
+  latency?: number
+  versionName?: string
+  protocol?: number
+  playersOnline?: number
+  playersMax?: number
+  motd?: string
+  favicon?: string
+  /** game version we would use to talk to it, when supported */
+  resolvedVersion?: string
+  supported?: boolean
+  verified?: boolean
+  error?: string
+}

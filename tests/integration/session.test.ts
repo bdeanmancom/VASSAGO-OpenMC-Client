@@ -48,13 +48,30 @@ describe(`Paper ${version} — offline-mode server`, () => {
     expect(rp.url).toContain('vassago-test-pack.zip')
   })
 
+  it('can also accept the resource pack offer and still joins', async () => {
+    const c = new TestClient('VassagoAcc')
+    void c.waitFor('resourcePack', () => true, 60000).then(() => c.send({ t: 'resourcePack', accept: true })).catch(() => {})
+    await c.joined(port)
+    expect(c.chunks.size).toBeGreaterThanOrEqual(9)
+    const dc = c.waitFor('disconnect')
+    c.close()
+    await dc
+  })
+
   it('builds a test platform using operator commands (chat commands work)', async () => {
     op.chat('/gamemode creative')
     await op.waitFor('gameMode', e => e.gameMode === 'creative')
+    // start from the surface no matter where a previous run left this player
+    op.chat(`/spreadplayers ${Math.floor(op.pos.x)} ${Math.floor(op.pos.z)} 0 3 under 100 false VassagoOp`)
+    await sleep(1500)
+    await op.until(() => op.pos.onGround, 20000, 'standing on the surface')
     const bx = Math.floor(op.pos.x); const bz = Math.floor(op.pos.z)
-    px = bx; pz = bz; py = Math.min(Math.floor(op.pos.y) + 30, 300)
+    const ground = Math.floor(op.pos.y)
+    px = bx; pz = bz; py = ground + 24
+    op.chat(`/fill ${px - 6} ${ground + 4} ${pz - 6} ${px + 6} ${ground + 60} ${pz + 6} minecraft:air`) // leftovers from aborted runs
+    await sleep(300)
+    op.blocks.clear()
     op.chat(`/fill ${px - 6} ${py} ${pz - 6} ${px + 6} ${py} ${pz + 6} minecraft:stone`)
-    op.chat(`/fill ${px - 6} ${py + 1} ${pz - 6} ${px + 6} ${py + 4} ${pz + 6} minecraft:air`)
     await op.until(() => op.blocks.has(`${px},${py},${pz}`), 15000, 'platform block updates')
     op.chat(`/tp VassagoOp ${px + 0.5} ${py + 1} ${pz + 0.5}`)
     await op.until(() => Math.abs(op.pos.y - (py + 1)) < 0.01 && op.pos.onGround, 15000, 'teleport onto platform')
@@ -147,8 +164,11 @@ describe(`Paper ${version} — offline-mode server`, () => {
     const dig = await started
     expect(dig.timeMs).toBeGreaterThan(300)
     await op.until(() => op.blocks.get(key) === 0, 10000, 'dirt broken')
-    // the drop is picked up
+    // walk onto the drop (it scatters a little) and pick it up
+    op.chat(`/tp VassagoOp ${tx + 0.5} ${py + 1} ${tz + 0.5}`)
     await op.until(() => op.window?.slots.some(s => s?.name === 'dirt') === true, 15000, 'dirt item collected')
+    op.chat(`/tp VassagoOp ${px + 0.5} ${py + 1} ${pz + 0.5}`)
+    await op.until(() => Math.abs(op.pos.x - (px + 0.5)) < 0.01, 10000, 'teleport back')
   })
 
   it('moves items in the inventory and crafts in the 2x2 grid', async () => {
@@ -192,6 +212,39 @@ describe(`Paper ${version} — offline-mode server`, () => {
     expect(op.window!.slots.some(s => s?.name === 'oak_planks')).toBe(false)
   })
 
+  it('uses held items (water bucket) and attacks entities', async () => {
+    op.chat('/gamemode creative')
+    await op.waitFor('gameMode', e => e.gameMode === 'creative')
+    op.chat(`/tp VassagoOp ${px + 0.5} ${py + 1} ${pz + 0.5}`)
+    await op.until(() => Math.abs(op.pos.x - (px + 0.5)) < 0.01 && op.pos.onGround, 10000, 'teleport')
+    op.chat('/clear VassagoOp')
+    op.chat('/give VassagoOp minecraft:water_bucket 1')
+    await op.until(() => op.window?.slots.some(s => s?.name === 'water_bucket') === true, 10000, 'bucket')
+    op.send({ t: 'hotbar', slot: op.window!.slots.findIndex(s => s?.name === 'water_bucket') - 36 })
+    op.send({ t: 'look', yaw: 0, pitch: -Math.PI / 2 + 0.01 })
+    await sleep(300)
+    const key = `${px},${py + 1},${pz}`
+    op.blocks.delete(key)
+    op.send({ t: 'useItem' })
+    await op.until(() => (op.blocks.get(key) ?? 0) !== 0, 10000, 'water placed by bucket')
+    op.send({ t: 'useItemRelease' })
+    op.chat(`/setblock ${px} ${py + 1} ${pz} minecraft:air`)
+
+    op.chat(`/summon minecraft:pig ${px + 0.5} ${py + 1} ${pz - 1.5} {NoAI:1b}`)
+    const isOurPig = (e: any) => e.name === 'pig' && Math.abs(e.y - (py + 1)) < 1 && Math.abs(e.x - (px + 0.5)) < 1
+    await op.until(() => [...op.entities.values()].some(isOurPig), 10000, 'pig spawned')
+    const pig = [...op.entities.values()].find(isOurPig)
+    expect(pig.width).toBeGreaterThan(0.5)
+    op.chat('/gamemode survival')
+    await op.waitFor('gameMode', e => e.gameMode === 'survival')
+    const hurt = op.waitFor('entityAnim', e => e.id === pig.id && e.anim === 'hurt', 10000)
+    op.send({ t: 'look', yaw: 0, pitch: -0.3 })
+    op.send({ t: 'attack', id: pig.id })
+    await hurt
+    op.chat('/kill @e[type=minecraft:pig]')
+    await op.until(() => ![...op.entities.values()].some(e => e.name === 'pig'), 10000, 'pig removed')
+  })
+
   it('reports damage, death and respawns', async () => {
     const hurt = op.waitFor('hurt')
     op.chat('/damage VassagoOp 4')
@@ -218,6 +271,16 @@ describe(`Paper ${version} — offline-mode server`, () => {
     await op.until(() => Math.abs(op.pos.x - (px + 0.5)) < 0.01 && op.pos.onGround, 30000, 'landing back in the overworld')
   })
 
+  it('cleans up the test platform', async () => {
+    // `under py` makes the command look for ground below the platform instead of landing on it
+    op.chat(`/spreadplayers ${px} ${pz} 0 3 under ${py} false @a`)
+    await sleep(1500)
+    op.chat(`/fill ${px - 6} ${py} ${pz - 6} ${px + 6} ${py + 2} ${pz + 6} minecraft:air`)
+    await op.until(() => op.blocks.get(`${px},${py},${pz}`) === 0, 10000, 'platform removed')
+    await sleep(1500)
+    await op.until(() => op.pos.onGround && op.pos.y < py, 20000, 'back on the surface')
+  })
+
   it('reports kicks with the server-provided reason', async () => {
     const dc = bob.waitFor('disconnect')
     op.chat('/kick VassagoBob integration test kick')
@@ -234,6 +297,27 @@ describe(`Paper ${version} — offline-mode server`, () => {
     const dc = bob.waitFor('disconnect')
     bob.close()
     expect((await dc).kicked).toBe(false)
+  })
+
+  it('a player who logs in while dead reaches the death state and can respawn', async () => {
+    autoDeclinePack(bob)
+    await bob.joined(port)
+    const died = bob.waitFor('death')
+    op.chat('/kill VassagoBob')
+    await died
+    const dc = bob.waitFor('disconnect')
+    bob.close()
+    await dc
+    await sleep(500)
+    autoDeclinePack(bob)
+    bob.events.length = 0
+    const playing = bob.waitFor('phase', e => e.phase === 'playing', 60000)
+    const deadAgain = bob.waitFor('death', () => true, 60000)
+    bob.connect(port)
+    await Promise.all([playing, deadAgain])
+    const alive = bob.waitFor('health', e => e.health === 20, 15000)
+    bob.send({ t: 'respawn' })
+    await alive
   })
 })
 

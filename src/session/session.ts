@@ -50,6 +50,9 @@ export class GameSession {
   private loggedIn = false
   private pendingPacks: { uuid?: string, hash?: string }[] = []
   private lastReason: { reason: string, kicked: boolean } | null = null
+  private chatMessage: any = null
+  private spawned = false
+  private chatMessageFor: any = null
 
   constructor (private readonly host: SessionHost) {}
 
@@ -92,7 +95,6 @@ export class GameSession {
       case 'windowClose': if (bot.currentWindow) bot.closeWindow(bot.currentWindow); this.windowDirty = true; break
       case 'drop': this.dropHeld(cmd.stack); break
       case 'respawn': bot.respawn(); break
-      case 'resourcePack': this.answerResourcePack(cmd.accept); break
       case 'viewDistance': bot.setSettings({ viewDistance: cmd.chunks }); break
       case 'fly': this.setFlying(cmd.flying); break
     }
@@ -105,6 +107,7 @@ export class GameSession {
     this.opts = opts
     this.ended = false
     this.loggedIn = false
+    this.spawned = false
     this.lastReason = null
     this.tick = 0
     this.emit({ t: 'phase', phase: opts.auth === 'microsoft' ? 'authenticating' : 'connecting', detail: `${opts.host}:${opts.port}` })
@@ -216,6 +219,7 @@ export class GameSession {
     }))
 
     bot.on('spawn', guard(() => {
+      this.spawned = true
       this.emit({ t: 'phase', phase: 'playing' })
       this.emit({ t: 'forcedLook', yaw: bot.entity.yaw, pitch: bot.entity.pitch })
       this.emitHealth()
@@ -260,7 +264,13 @@ export class GameSession {
     bot.on('forcedMove', guard(() => this.emit({ t: 'forcedLook', yaw: bot.entity.yaw, pitch: bot.entity.pitch })))
     bot.on('health', guard(() => this.emitHealth()))
     bot.on('experience', guard(() => this.emit({ t: 'experience', level: bot.experience.level, progress: bot.experience.progress })))
-    bot.on('death', guard(() => this.emit({ t: 'death' })))
+    bot.on('death', guard(() => {
+      // Logging in while dead never produces a 'spawn'; enter the world anyway so the
+      // front-end can show the death screen and offer to respawn.
+      if (!this.spawned) { this.spawned = true; this.emit({ t: 'phase', phase: 'playing' }); this.windowDirty = true; this.emitPlayers(); this.emitTime() }
+      this.emitHealth()
+      this.emit({ t: 'death' })
+    }))
     bot.on('entityHurt', guard((e: any) => {
       if (e === bot.entity) this.emit({ t: 'hurt' })
       else this.emit({ t: 'entityAnim', id: e.id, anim: 'hurt' })
@@ -284,15 +294,15 @@ export class GameSession {
       this.emit({ t: 'chat', motd: safeMotd(msg), plain: String(msg.toString?.() ?? msg), kind })
     }))
     bot.on('actionBar', guard((msg: any) => this.emit({ t: 'chat', motd: safeMotd(msg), plain: String(msg.toString?.() ?? msg), kind: 'actionbar' })))
-    bot.on('title', guard((text: any, type: string) => this.emit({ t: 'title', text: titleText(text), subtitle: type === 'subtitle' })))
-    bot.on('time', guard(() => { if (this.tick % 20 === 0) this.emitTime() }))
+    bot.on('title', guard((text: any, type: string) => this.emit({ t: 'title', text: this.text(text), subtitle: type === 'subtitle' })))
+    bot.on('time', guard(() => this.emitTime()))
     bot.on('rain', guard(() => this.emitTime()))
     bot.on('playerJoined', guard(() => this.emitPlayers()))
     bot.on('playerLeft', guard(() => this.emitPlayers()))
     bot.on('playerUpdated', guard(() => this.emitPlayers()))
     const onPack = guard((p: any) => {
       this.pendingPacks.push({ uuid: p.uuid, hash: p.hash })
-      this.emit({ t: 'resourcePack', url: String(p.url), forced: !!p.forced, prompt: p.promptMessage ? titleText(p.promptMessage) : undefined })
+      this.emit({ t: 'resourcePack', url: String(p.url), forced: !!p.forced, prompt: p.promptMessage ? this.text(p.promptMessage) : undefined })
     })
     client.on('add_resource_pack', onPack)
     client.on('resource_pack_send', onPack)
@@ -313,7 +323,7 @@ export class GameSession {
 
     // --- lifecycle
     bot.on('kicked', guard((reason: any) => {
-      this.lastReason = { reason: titleText(reason) || 'Kicked by server', kicked: true }
+      this.lastReason = { reason: this.text(reason) || 'Kicked by server', kicked: true }
     }))
     bot.on('error', guard((err: any) => {
       this.log('warn', `connection error: ${err?.message ?? err}`)
@@ -564,11 +574,32 @@ export class GameSession {
   private windowClick (slot: number, button: number, mode: number) {
     const bot = this.bot
     if (mode < 0 || mode > 4) return
-    bot.clickWindow(slot, button, mode).then(() => { this.windowDirty = true }).catch((err: any) => {
+    const w = bot.currentWindow ?? bot.inventory
+    const gridSize = this.craftingGridSize(w)
+    const takesCraftResult = gridSize > 0 && slot === 0 && mode === 0 && !!w.slots[0]
+    bot.clickWindow(slot, button, mode).then(() => {
+      // Before 1.21.5 the server does not echo the consumed ingredients after a craft;
+      // the client is expected to predict them (the vanilla client does the same).
+      if (takesCraftResult && bot.registry.isOlderThan('1.21.5')) {
+        for (let i = 1; i <= gridSize; i++) {
+          const it = w.slots[i]
+          if (!it) continue
+          if (it.count > 1) { it.count--; w.updateSlot(i, it) } else w.updateSlot(i, null)
+        }
+      }
+      this.windowDirty = true
+    }).catch((err: any) => {
       this.log('debug', `window click rejected: ${err?.message ?? err}`)
       this.windowDirty = true
     })
     this.windowDirty = true
+  }
+
+  /** Number of crafting-grid slots following result slot 0, or 0 when the window is not a crafting window. */
+  private craftingGridSize (w: any): number {
+    if (w === this.bot.inventory) return 4
+    const type = String(w.type ?? '')
+    return type.includes('crafting') ? 9 : 0
   }
 
   private dropHeld (stack: boolean) {
@@ -586,7 +617,7 @@ export class GameSession {
     let enchanted = false
     try { enchanted = (item.enchants?.length ?? 0) > 0 } catch {}
     let customName: string | undefined
-    try { const cn = item.customName; if (cn) customName = titleText(cn) } catch {}
+    try { const cn = item.customName; if (cn) customName = this.text(cn) } catch {}
     let damage: number | undefined
     try { damage = item.durabilityUsed || undefined } catch {}
     return {
@@ -633,12 +664,39 @@ export class GameSession {
     return {
       id: w.id,
       type: isInv ? 'inventory' : String(w.type),
-      title: isInv ? 'Inventory' : titleText(w.title),
+      title: isInv ? 'Inventory' : this.text(w.title),
       inventoryStart: isInv ? 9 : w.inventoryStart,
       slots: w.slots.map((it: any) => this.itemDTO(it)),
       cursor: this.itemDTO(w.selectedItem),
       hotbar: bot.quickBarSlot ?? 0
     }
+  }
+
+  /**
+   * Flatten any chat component (JSON string, NBT, object) to plain text, translating
+   * language keys through the protocol library's tables when available.
+   */
+  private text (v: any): string {
+    if (v == null) return ''
+    const known = knownKey(v)
+    if (known) return known
+    try {
+      const bot = this.bot
+      if (bot?.registry) {
+        if (!this.chatMessage || this.chatMessageFor !== bot.registry) {
+          // eslint-disable-next-line @typescript-eslint/no-var-requires
+          this.chatMessage = require('prismarine-chat')(bot.registry)
+          this.chatMessageFor = bot.registry
+        }
+        const CM = this.chatMessage
+        let input = v
+        if (typeof input === 'string' && (input.startsWith('{') || input.startsWith('[') || input.startsWith('"'))) { try { input = JSON.parse(input) } catch {} }
+        const msg = typeof CM.fromNotch === 'function' ? CM.fromNotch(input) : new CM(input)
+        const out = String(msg.toString())
+        if (out.length > 0) return out
+      }
+    } catch {}
+    return titleText(v)
   }
 
   private emitHealth () {
@@ -694,6 +752,22 @@ export function titleText (v: any): string {
     return out
   }
   return String(v)
+}
+
+/** Our own wording for a few well-known disconnect keys (more actionable than the stock text). */
+function knownKey (v: any): string | null {
+  let o = v
+  if (typeof o === 'string') {
+    if (!o.startsWith('{')) return KNOWN_KEYS[o] ?? null
+    try { o = JSON.parse(o) } catch { return null }
+  }
+  if (o && typeof o === 'object') {
+    if ('type' in o && 'value' in o && o.type === 'compound') o = o.value
+    let key = o.translate
+    if (key && typeof key === 'object' && 'value' in key) key = key.value
+    if (typeof key === 'string' && KNOWN_KEYS[key]) return KNOWN_KEYS[key]
+  }
+  return null
 }
 
 const KNOWN_KEYS: Record<string, string> = {

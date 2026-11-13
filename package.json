@@ -2,7 +2,7 @@
   "name": "vassago-client",
   "productName": "Vassago",
   "version": "0.1.0",
-  "description": "Vassago — a free, independent, open-source client compatible with Minecraft: Java Edition servers. Not affiliated with Mojang or Microsoft.",
+  "description": "Vassago \u2014 a free, independent, open-source client compatible with Minecraft: Java Edition servers. Not affiliated with Mojang or Microsoft.",
   "license": "MIT",
   "author": "Vassago Client contributors",
   "homepage": "https://github.com/bdeanmancom/VASSAGO-OpenMC-Client",
@@ -22,7 +22,11 @@
     "dist": "npm run build && electron-builder --publish never",
     "dist:linux": "npm run build && electron-builder --linux --publish never",
     "dist:win": "npm run build && electron-builder --win --publish never",
-    "dist:mac": "npm run build && electron-builder --mac --publish never"
+    "dist:mac": "npm run build && electron-builder --mac --publish never",
+    "make:icon": "node scripts/make-icon.mjs",
+    "pack:dir": "npm run build && electron-builder --dir --publish never",
+    "pretest": "node scripts/gen-blockdata.mjs --if-missing",
+    "pretypecheck": "node scripts/gen-blockdata.mjs --if-missing"
   },
   "dependencies": {
     "minecraft-data": "^3.119.0",
@@ -46,5 +50,89 @@
     "typescript": "^5.7.2",
     "vite": "^6.0.3",
     "vitest": "^2.1.8"
+  },
+  "build": {
+    "appId": "live.vassago.client",
+    "productName": "Vassago",
+    "copyright": "Copyright \u00a9 2026 Vassago Client contributors (MIT License)",
+    "asar": false,
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**",
+      "resources/gamedata/**",
+      "package.json",
+      "LICENSE",
+      "!**/*.map",
+      "!node_modules/minecraft-data/minecraft-data/data/bedrock/**",
+      "node_modules/minecraft-data/minecraft-data/data/bedrock/common/**",
+      "!node_modules/minecraft-data/doc/**",
+      "!node_modules/**/{test,tests,docs,examples,example}/**",
+      "!node_modules/**/*.{md,markdown,ts,map}",
+      "node_modules/**/*.d.ts"
+    ],
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "category": "Game",
+      "icon": "build/icon.png",
+      "artifactName": "Vassago-${version}-linux-${arch}.${ext}",
+      "synopsis": "Open voxel client for Java Edition-compatible servers"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "artifactName": "Vassago-${version}-windows-${arch}-setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "Vassago"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "category": "public.app-category.games",
+      "icon": "build/icon.png",
+      "artifactName": "Vassago-${version}-mac-${arch}.${ext}",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
+    },
+    "dmg": {
+      "sign": false
+    }
   }
 }

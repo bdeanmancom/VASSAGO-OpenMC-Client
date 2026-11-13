@@ -3,28 +3,14 @@
  * PrismarineJS data tables; this module decides which game version to speak
  * and whether it is one we have actually verified.
  */
-import { VERIFIED_VERSIONS } from '../shared/protocol'
+import { VERIFIED_VERSIONS, type PingResult } from '../shared/protocol'
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const mc = require('minecraft-protocol')
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const mineflayer = require('mineflayer')
 
-export interface PingResult {
-  online: boolean
-  latency?: number
-  versionName?: string
-  protocol?: number
-  playersOnline?: number
-  playersMax?: number
-  motd?: string
-  favicon?: string
-  /** game version we would use to talk to it, when supported */
-  resolvedVersion?: string
-  supported?: boolean
-  verified?: boolean
-  error?: string
-}
+export type { PingResult } from '../shared/protocol'
 
 export function supportedVersions (): string[] {
   const tested: string[] = mineflayer.testedVersions ?? []
