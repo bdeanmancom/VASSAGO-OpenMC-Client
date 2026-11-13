@@ -5,10 +5,14 @@ import { pingServer } from '../../src/session/versions'
 const port = inject('port')
 const onlinePort = inject('onlinePort')
 const version = inject('version')
+// On a server that admits older clients through ViaBackwards the client speaks an older version than the server runs.
+const clientVersion = inject('clientVersion')
 
 const op = new TestClient('VassagoOp')
 const bob = new TestClient('VassagoBob')
 let px = 0; let py = 0; let pz = 0 // platform centre block (stone), players stand on py+1
+/** How long the keep-connected test plays for. */
+const SOAK_SECONDS = Number(process.env.VASSAGO_SOAK_SECONDS ?? 60)
 
 function autoDeclinePack (c: TestClient) {
   void c.waitFor('resourcePack', () => true, 60000).then(() => c.send({ t: 'resourcePack', accept: false })).catch(() => {})
@@ -24,7 +28,7 @@ describe(`Paper ${version} — offline-mode server`, () => {
   it('answers the status ping and negotiates the protocol version', async () => {
     const res = await pingServer('127.0.0.1', port)
     expect(res.online).toBe(true)
-    expect(res.resolvedVersion).toBe(version)
+    expect(res.resolvedVersion).toBe(clientVersion)
     expect(res.supported).toBe(true)
     expect(res.motd).toContain('Vassago test server')
     expect(res.playersMax).toBe(10)
@@ -33,7 +37,7 @@ describe(`Paper ${version} — offline-mode server`, () => {
   it('logs in without Microsoft authentication and receives the world', async () => {
     const login = op.events.find(e => e.t === 'login') as any
     expect(login.username).toBe('VassagoOp')
-    expect(login.version).toBe(version)
+    expect(login.version).toBe(clientVersion)
     expect(login.dimension).toContain('overworld')
     expect(op.chunks.size).toBeGreaterThanOrEqual(9)
     const anyChunk = [...op.chunks.values()][0]
@@ -167,6 +171,64 @@ describe(`Paper ${version} — offline-mode server`, () => {
     op.chat(`/tp VassagoOp ${px + 0.5} ${py + 1} ${pz + 0.5}`)
     await op.until(() => Math.abs(op.pos.x - (px + 0.5)) < 0.01, 10000, 'teleport back')
   })
+
+  it(`stays connected for ${SOAK_SECONDS}s while standing, walking, jumping, sneaking, placing and breaking`, async () => {
+    // Regression test for the 26.3 "Invalid move player packet received" kick: a client that never
+    // ends its ticks is disconnected on its second position packet, i.e. within about a second.
+    const idle = { forward: false, back: false, left: false, right: false, jump: false, sprint: false, sneak: false }
+    const disconnected = () => op.events.find(e => e.t === 'disconnect') as any
+    const alive = (what: string) => { const d = disconnected(); if (d) throw new Error(`disconnected while ${what}: ${d.reason}${d.detail ? ` (${d.detail})` : ''}`) }
+    const home = async () => {
+      op.chat(`/tp VassagoOp ${px + 0.5} ${py + 1} ${pz + 0.5}`)
+      await op.until(() => !!disconnected() || (Math.abs(op.pos.x - (px + 0.5)) < 0.01 && Math.abs(op.pos.z - (pz + 0.5)) < 0.01 && op.pos.onGround), 10000, 'teleport home')
+      alive('teleporting')
+    }
+    await op.mode('creative')
+    await home()
+    op.chat('/clear VassagoOp')
+    op.chat('/give VassagoOp minecraft:stone 64')
+    await op.until(() => op.window?.slots.some(s => s?.name === 'stone') === true, 10000, 'stone in inventory')
+    op.send({ t: 'hotbar', slot: op.window!.slots.findIndex(s => s?.name === 'stone') - 36 })
+
+    // standing completely still is what used to get the client kicked
+    await sleep(4000)
+    alive('standing still')
+
+    const until = Date.now() + SOAK_SECONDS * 1000
+    let rounds = 0
+    const tx = px + 3; const tz = pz + 3
+    const key = `${tx},${py + 1},${tz}`
+    while (Date.now() < until) {
+      op.send({ t: 'look', yaw: 0, pitch: 0 })
+      op.send({ t: 'controls', c: { ...idle, forward: true } })
+      await sleep(700)
+      op.send({ t: 'controls', c: { ...idle, forward: true, jump: true } })
+      await sleep(600)
+      op.send({ t: 'controls', c: { ...idle, sneak: true, back: true } })
+      await sleep(900)
+      op.send({ t: 'controls', c: { ...idle, sprint: true, left: true, forward: true } })
+      await sleep(400)
+      op.send({ t: 'controls', c: idle })
+      alive('moving')
+      await home()
+
+      op.blocks.delete(key)
+      op.send({ t: 'useBlock', x: tx, y: py, z: tz, face: 1, cx: 0.5, cy: 1, cz: 0.5 })
+      await op.until(() => !!disconnected() || (op.blocks.get(key) ?? 0) !== 0, 10000, 'block placed')
+      alive('placing a block')
+      op.send({ t: 'digStart', x: tx, y: py + 1, z: tz, face: 1 })
+      await op.until(() => !!disconnected() || op.blocks.get(key) === 0, 10000, 'block broken')
+      alive('breaking a block')
+      await sleep(1200) // an idle stretch every round
+      alive('idling')
+      rounds++
+    }
+    expect(rounds).toBeGreaterThan(3)
+    expect(disconnected()).toBeUndefined()
+    // the server still agrees about where we are
+    await home()
+    await op.mode('survival')
+  }, (SOAK_SECONDS + 90) * 1000)
 
   it('moves items in the inventory and crafts in the 2x2 grid', async () => {
     op.chat('/clear VassagoOp')
@@ -310,6 +372,24 @@ describe(`Paper ${version} — offline-mode server`, () => {
     await op.until(() => op.blocks.get(`${px},${py},${pz}`) === 0, 10000, 'platform removed')
     await sleep(1500)
     await op.until(() => op.pos.onGround && op.pos.y < py, 20000, 'back on the surface')
+  })
+
+  it('explains a whitelist refusal', async () => {
+    op.chat('/whitelist on')
+    await sleep(600)
+    try {
+      const stranger = new TestClient('VassagoStranger')
+      const dc = stranger.waitFor('disconnect', () => true, 30000)
+      stranger.connect(port)
+      const ev = await dc
+      expect(stranger.events.some(e => e.t === 'login')).toBe(false)
+      expect(ev.kind).toBe('whitelist')
+      expect(ev.kicked).toBe(true)
+      expect(ev.reason).toMatch(/whitelist/i)
+    } finally {
+      op.chat('/whitelist off')
+      await sleep(600)
+    }
   })
 
   it('reports kicks with the server-provided reason', async () => {

@@ -169,6 +169,9 @@ export async function prepareServer (opts) {
     'max-players': '10',
     motd: `Vassago test server (${opts.online ? 'online' : 'offline'} mode)`,
     'enforce-secure-profile': 'false',
+    // newer server versions create fresh servers with the whitelist on; tests toggle it themselves
+    'white-list': 'false',
+    'enforce-whitelist': 'false',
     'network-compression-threshold': '256',
     'allow-flight': 'true',
     'sync-chunk-writes': 'false',

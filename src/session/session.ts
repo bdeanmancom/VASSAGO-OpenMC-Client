@@ -13,6 +13,7 @@ import type {
 import { FACE_VECTORS } from '../shared/protocol'
 import { resolveVersion } from './versions'
 import { classifyError, classifyKick, type Classified } from './errors'
+import { installTickEnd } from './tick-end'
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const mineflayer = require('mineflayer')
@@ -53,6 +54,7 @@ export class GameSession {
   /** true while a failed Microsoft sign-in is being examined; the final disconnect is sent afterwards */
   private diagnosing = false
   private chatMessage: any = null
+  private undoTickEnd: (() => void) | null = null
   private spawned = false
   private chatMessageFor: any = null
 
@@ -312,6 +314,8 @@ export class GameSession {
     // --- inventory / windows
     const markWindow = guard(() => { this.windowDirty = true })
     bot.once('inject_allowed', guard(() => { bot.inventory.on('updateSlot', markWindow) }))
+    // End every client tick like the official client does (26.3 servers kick clients that don't).
+    bot.once('inject_allowed', guard(() => { this.undoTickEnd?.(); this.undoTickEnd = installTickEnd(bot) }))
     bot.on('heldItemChanged', markWindow)
     bot.on('windowOpen', guard((w: any) => {
       w.on('updateSlot', markWindow)
@@ -396,6 +400,8 @@ export class GameSession {
     const bot = this.bot
     this.bot = null
     this.loggedIn = false
+    try { this.undoTickEnd?.() } catch {}
+    this.undoTickEnd = null
     this.dirtyEntities.clear()
     this.pendingBlocks = []
     this.pendingLight.clear()
