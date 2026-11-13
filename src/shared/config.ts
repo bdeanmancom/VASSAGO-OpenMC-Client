@@ -143,6 +143,9 @@ export function sanitizeConfig (raw: unknown): AppConfig {
   }
   settings.renderDistance = Math.min(32, Math.max(2, Math.round(settings.renderDistance)))
   settings.fov = Math.min(110, Math.max(30, settings.fov))
+  settings.guiScale = Math.min(1.5, Math.max(0.75, settings.guiScale))
+  settings.volume = Math.min(1, Math.max(0, settings.volume))
+  settings.resolutionScale = Math.min(1, Math.max(0.5, settings.resolutionScale))
   const out: AppConfig = {
     schema: 1,
     profiles: profiles.length > 0 ? profiles : def.profiles,

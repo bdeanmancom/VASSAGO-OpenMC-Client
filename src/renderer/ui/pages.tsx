@@ -368,6 +368,7 @@ export function SettingsBody ({ ctx, inGame }: { ctx: Pick<AppCtx, 'config' | 's
           <Slider label="Frame-rate limit" hint="Unlimited follows your display’s refresh rate." value={s.fpsLimit === 0 ? 250 : s.fpsLimit} min={30} max={250} step={10} onChange={v => set({ fpsLimit: v >= 250 ? 0 : v })} format={v => v >= 250 ? 'Unlimited' : `${v} fps`} />
           <Slider label="Brightness" value={Math.round(s.brightness * 100)} min={0} max={100} onChange={v => set({ brightness: v / 100 })} format={v => `${v}%`} />
           <Slider label="Resolution scale" hint="Lower values render fewer pixels for more speed." value={Math.round(s.resolutionScale * 100)} min={50} max={100} step={5} onChange={v => set({ resolutionScale: v / 100 })} format={v => `${v}%`} />
+          <Slider label="HUD scale" value={Math.round(s.guiScale * 100)} min={75} max={150} step={5} onChange={v => set({ guiScale: v / 100 })} format={v => `${v}%`} />
           <Toggle label="Smooth lighting" hint="Ambient occlusion and soft light gradients." value={s.smoothLighting} onChange={v => set({ smoothLighting: v })} />
           <Toggle label="Clouds" value={s.clouds} onChange={v => set({ clouds: v })} />
           <Toggle label="Anti-aliasing" hint={inGame ? 'Applies the next time you join a world.' : undefined} value={s.antialias} onChange={v => set({ antialias: v })} />

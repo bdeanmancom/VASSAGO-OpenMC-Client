@@ -14,7 +14,16 @@ Vassago's own procedural art engine.
   offline mode. No Microsoft sign-in involved.
 * **Official Account Mode** — Microsoft device-code sign-in for online-mode servers. Ownership is
   checked by Microsoft/Mojang; Vassago never sees your password and never bypasses server authentication.
-* Windows, macOS (Apple Silicon + Intel) and Linux. MIT licensed. No telemetry, no ads, no fees.
+* Installers are built for Windows, macOS (Apple Silicon + Intel) and Linux; so far only the Linux
+  build has actually been run. MIT licensed. No telemetry, no ads, no fees.
+
+| | |
+|---|---|
+| ![Launcher](docs/screenshots/launcher-play.jpg) | ![Server list](docs/screenshots/launcher-servers.jpg) |
+| ![World](docs/screenshots/world.jpg) | ![Another player](docs/screenshots/multiplayer.jpg) |
+| ![Inventory and crafting](docs/screenshots/inventory.jpg) | ![Survival HUD](docs/screenshots/survival-hud.jpg) |
+
+_Screenshots are captured by the automated end-to-end test (software rendering, PaperMC 1.21.11)._
 
 See [DEVELOPMENT_STATUS.md](DEVELOPMENT_STATUS.md) for exactly what is verified, what is partial and
 what is missing — nothing is claimed that has not been tested.

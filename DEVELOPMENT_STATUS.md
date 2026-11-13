@@ -10,13 +10,14 @@ do not assume it works.
 
 | Suite | Result | Environment |
 |---|---|---|
-| Unit (`npm test`) | 34 / 34 pass | Node 22 |
-| Integration (`npm run test:integration`) | 24 / 24 pass on **1.21.11**; 22 / 22 on **1.21.4** (run before the last two tests were added) | PaperMC 1.21.11 build 132 and PaperMC 1.21.4, offline-mode + online-mode profiles, Java 21, Linux x64 |
+| Unit (`npm test`) | 37 / 37 pass | Node 22 |
+| Integration (`npm run test:integration`) | 25 / 25 pass on **1.21.11** and on **1.21.4** | PaperMC 1.21.11 (build 132) and PaperMC 1.21.4, offline-mode + online-mode profiles, Java 21, Linux x64 |
 | End-to-end (`npm run test:e2e`) | 21 / 21 steps pass on 1.21.11 | Real Electron 39 app driven by Playwright under Xvfb with software GL (SwiftShader) |
-| Packaging | Linux AppImage built (126 MB) and the unpacked build smoke-tested (joins server, renders) | Linux x64 |
+| GitHub Actions | Run #2 green: typecheck, unit, integration, build, end-to-end, then installers **built** on `ubuntu-latest`, `windows-latest` and `macos-latest` | commit `37c3bb6` |
+| Packaging | Linux AppImage (≈125 MB), Windows NSIS installer (≈104 MB), macOS dmg + zip for arm64 and x64 produced by CI. Only the Linux unpacked build has been **launched** (joins a server and renders). | CI artifacts |
 
-Everything was run on Linux x64 in a headless container. **Nothing has been run on Windows or macOS
-yet, and nothing has been run on a real GPU** — see "Not verified" below.
+Local runs and CI both used Linux for everything that executes the app. **No Windows or macOS build
+has been launched yet, and nothing has been run on a real GPU** — see "Not verified" below.
 
 ## Verified (automated, against a real Paper server)
 
@@ -45,7 +46,7 @@ Gameplay
 - Block placing and breaking (instant in creative, timed in survival) visible to other players
 - Item pickup, hotbar selection, inventory moves (click / right-click / shift-click)
 - 2×2 crafting; chest container open / shift-move / close
-- Using items (water bucket), attacking an entity (hurt feedback)
+- Using items (water bucket), attacking an entity (hurt feedback), creative flight
 - Health and hunger HUD, damage feedback, death, respawn
 
 Application
@@ -59,9 +60,10 @@ Application
 | Area | State |
 |---|---|
 | **Microsoft account sign-in** | Device-code flow via `prismarine-auth`, tokens encrypted with the OS keychain, custom Azure client-ID option. **Never exercised end-to-end**: no Microsoft account was available in the build environment. Only the rejection path against an online-mode server is tested. Treat as untested. |
-| Versions other than 1.21.4 / 1.21.11 | Game data is generated for 1.20.2 – 26.1 and the UI marks them *experimental*. 1.20.4 was tried: 19 / 22 integration tests passed (item pickup, bucket use and the self-hurt event failed). 26.1 was not tried (its server needs a newer Java than the build machine had). |
+| Versions other than 1.21.4 / 1.21.11 | Game data is generated for 1.20.2 – 26.1 and the UI marks them *experimental*. 1.20.4 was tried once with an earlier 22-test version of the suite: 19 passed (item pickup, bucket use and the self-hurt event failed). 26.1 was not tried (its server needs a newer Java than the build machine had). |
 | End-to-end UI on 1.21.4 | Only the headless integration suite was run on 1.21.4; the Electron e2e run was 1.21.11 only. |
-| Creative flight | Double-tap Space toggles a simple flight mode (gravity off, vertical speed from Space/Shift). **Untested** — no automated or manual run yet. |
+| Sky light | Servers sometimes send edge chunks with unfinished sky light; the client repairs the vertical sky column locally (unit-tested). Light that should spread sideways under overhangs in those chunks can still be too dark. |
+| Creative flight | Double-tap Space toggles a simple flight mode (gravity off, vertical speed from Space/Shift). The flight mode is covered by one integration test (climb, hover, fly forward, land; the server does not correct the position); the double-tap key handling is untested, and speed/feel differ from the reference client. |
 | Containers other than chests | Layouts exist for crafting table, furnace family, hopper, dispenser, shulker box and a generic grid fallback. Only the chest is tested. Furnace progress, anvil text, enchanting, brewing, villager trading and beacon UIs are **not** implemented (the slots are shown, the special controls are not). |
 | Crash recovery | Renderer crash → window reloads with a notice; session-worker crash → disconnect screen with reconnect. Implemented, not fault-injection tested. |
 | Sound | A handful of synthesized effects (steps, break, place, hurt, splash). No server-driven sounds, no music. |
@@ -69,15 +71,13 @@ Application
 
 ## Not verified
 
-- **Windows and macOS builds.** The electron-builder configuration and the CI packaging jobs exist,
-  but no installer for those platforms has been produced or launched yet. macOS signing/notarization
-  needs credentials (see `docs/PACKAGING.md`).
+- **Windows and macOS builds at runtime.** CI produces the installers, but nobody has installed or
+  launched them. They are unsigned (SmartScreen / Gatekeeper warnings; see `docs/PACKAGING.md`).
 - **Real GPU performance.** All rendering runs so far used software GL (≈10–25 fps at 5 chunks,
   1280×800). Frame rates on real hardware are expected to be far higher but are unmeasured.
 - **Long sessions.** The longest continuous automated session is a few minutes.
 - **Public / proxied / modded servers.** Only vanilla-behaving Paper was tested. Velocity/BungeeCord
   transfers, Forge/Fabric mod handshakes, custom payload channels and anti-cheat plugins are untested.
-- **The GitHub Actions workflow** has not completed a run yet.
 
 ## Not implemented
 
@@ -106,7 +106,7 @@ Application
 
 1. Sign in with a real Microsoft account against an online-mode server; fix whatever breaks; add a
    manual test checklist for it.
-2. Get the CI workflow green, then download and launch the Windows and macOS artifacts.
+2. Download the Windows and macOS CI artifacts and launch them on real machines; add signing.
 3. Measure on real GPUs; add cave/occlusion culling and greedy meshing if needed.
 4. Run the integration + e2e suites on 1.21.5 – 1.21.9 and 26.1 and promote the ones that pass.
 5. Furnace/anvil/enchanting screens, creative inventory, biome tints, sign text, particles.

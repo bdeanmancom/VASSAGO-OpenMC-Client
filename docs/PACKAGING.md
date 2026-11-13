@@ -18,8 +18,8 @@ npm run dist:win     # → release/Vassago-<v>-windows-x64-setup.exe   (run on W
 npm run dist:mac     # → release/Vassago-<v>-mac-{arm64,x64}.dmg/.zip (run on macOS)
 ```
 
-> Only the Linux AppImage has been built and smoke-tested so far. The Windows and macOS targets are
-> configured but unverified — see `DEVELOPMENT_STATUS.md`.
+> CI builds all three platforms. Only the Linux build has been launched and smoke-tested so far;
+> the Windows and macOS installers are produced but have not been run — see `DEVELOPMENT_STATUS.md`.
 
 Builds are produced per-OS by the `package` job in `.github/workflows/ci.yml` (Linux, Windows, macOS
 runners) and uploaded as workflow artifacts.
