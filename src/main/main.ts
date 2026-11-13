@@ -13,7 +13,7 @@ import { ConfigStore } from './config-store'
 import { Logger } from './logger'
 import { SecureStore } from './secure-store'
 import type { AppInfo } from '../shared/bridge'
-import { VERIFIED_VERSIONS, type PingResult, type SessionCommand } from '../shared/protocol'
+import { VERIFIED_TRANSLATED, VERIFIED_VERSIONS, type PingResult, type SessionCommand } from '../shared/protocol'
 import { parseAddress } from '../shared/config'
 
 const E2E = !!process.env.VASSAGO_E2E
@@ -200,6 +200,7 @@ function registerIpc () {
     arch: process.arch,
     supportedVersions: await workerCall<string[]>({ k: 'versions' }, 15000, []),
     verifiedVersions: [...VERIFIED_VERSIONS],
+    verifiedTranslated: VERIFIED_TRANSLATED.map(t => ({ ...t })),
     secureStorage: secure.available,
     userData: app.getPath('userData')
   }))

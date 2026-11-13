@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { AuthMode, ConnectOptions, DisconnectKind } from '../../shared/protocol'
-import { OWNER_NOTE, OWNER_STEPS, disconnectCopy, ownerStepsText } from '../../shared/guidance'
+import { NAME_RESERVED_NOTE, OWNER_NOTE, OWNER_STEPS, disconnectCopy, ownerStepsText } from '../../shared/guidance'
 import { Icon } from './components'
 import type { Target } from './App'
 
@@ -96,6 +96,7 @@ export function Disconnected ({ info, target, opts, wasInWorld, onReconnect, onE
               ? 'You can let private-server profiles in by turning online mode off on the server:'
               : 'An online-mode server always needs an account that owns the game. On a server you run, you can turn online mode off and join with a private-server profile instead:'}</p>
             <OwnerSteps server={address} />
+            {serverWantsAccount && <p className="dc-note">{NAME_RESERVED_NOTE}</p>}
             <div className="dc-option-actions">
               {serverWantsAccount
                 ? <button className="btn primary" data-testid="reconnect" onClick={onReconnect}><Icon name="refresh" size={16} />I’ve restarted the server — try again</button>

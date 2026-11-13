@@ -38,6 +38,9 @@ export function createTickEndGuard (sendTickEnd: () => void, now: () => number =
   let positionSinceTickEnd = false
   let lastEnd = now()
   let sent = 0
+  // Set once the protocol library is seen ending ticks by itself (upstream has an unreleased
+  // change that does). From then on it owns the cadence and this guard only enforces the invariant.
+  let libraryEndsTicks = false
   const end = () => {
     sendTickEnd()
     sent++
@@ -46,6 +49,7 @@ export function createTickEndGuard (sendTickEnd: () => void, now: () => number =
   }
   return {
     beforeWrite (name) {
+      if (name === 'tick_end') { libraryEndsTicks = true; positionSinceTickEnd = false; lastEnd = now(); return }
       if (!POSITIONAL.has(name)) return
       // Two position packets must never reach the server without a tick end between them.
       if (positionSinceTickEnd) end()
@@ -53,7 +57,7 @@ export function createTickEndGuard (sendTickEnd: () => void, now: () => number =
     },
     // The physics loop calls this at the start of tick N, i.e. after tick N-1's movement packet:
     // on the wire that is "move, tick end, move, tick end, …" exactly like the official client.
-    onClientTick () { end() },
+    onClientTick () { if (!libraryEndsTicks) end() },
     // While the physics loop is paused (terrain not loaded yet, dead, mounted) the official client
     // still ends its ticks; keep doing so at tick rate.
     poll () { if (now() - lastEnd >= STALL_MS) end() },

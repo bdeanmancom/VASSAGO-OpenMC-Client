@@ -69,6 +69,10 @@ export function classifyError (err: unknown, auth: AuthMode = 'offline'): Classi
     }
   }
 
+  // The protocol library's own check, when a connection was made with a fixed version.
+  const mismatch = /This server is version (\S+), you are using version (\S+?),/.exec(msg)
+  if (mismatch) return of('version', `Version mismatch — the server runs ${mismatch[1]}, but this connection was made as ${mismatch[2]}.`)
+
   if (code === 'ETIMEDOUT' || /ETIMEDOUT|\btimed out\b|\btimeout\b/i.test(msg)) return of('network', 'Connection timed out — the server did not respond.')
   if (code === 'ECONNRESET' || /ECONNRESET|socketClosed/.test(msg)) return of('network', 'Connection lost — the server closed the connection.')
   if (/keepAliveError|client timed out/i.test(msg)) return of('network', 'Timed out — lost contact with the server.')
@@ -95,8 +99,9 @@ const KICK_RULES: KickRule[] = [
     kind: 'auth-required',
     reason: 'This server only accepts verified Microsoft accounts (it is running in online mode), so it refused this name.'
   },
+  // (With a KickContext the handshake decides this instead; see classifyKick.)
   { keys: ['multiplayer.disconnect.not_whitelisted'], text: /not white-?listed/i, kind: 'whitelist', reason: 'You are not on this server’s whitelist. Ask the server owner to add this exact username.' },
-  { keys: ['multiplayer.disconnect.banned', 'multiplayer.disconnect.banned_ip', 'multiplayer.disconnect.banned.reason', 'multiplayer.disconnect.banned.expiration', 'multiplayer.disconnect.banned_ip.reason', 'multiplayer.disconnect.banned_ip.expiration'], text: /\bYou are banned\b|\bbanned from this server\b/i, kind: 'banned' },
+  { keys: ['multiplayer.disconnect.banned', 'multiplayer.disconnect.ip_banned', 'multiplayer.disconnect.banned.reason', 'multiplayer.disconnect.banned.expiration', 'multiplayer.disconnect.banned_ip.reason', 'multiplayer.disconnect.banned_ip.expiration'], text: /\bYou are banned\b|\bbanned from this server\b|\bYou have been IP banned\b/i, kind: 'banned' },
   { keys: ['multiplayer.disconnect.server_full'], text: /server is full/i, kind: 'full', reason: 'The server is full.' },
   { keys: ['multiplayer.disconnect.outdated_client', 'multiplayer.disconnect.outdated_server', 'multiplayer.disconnect.incompatible'], text: /Outdated (client|server)|Incompatible client/i, kind: 'version' },
   {
@@ -121,16 +126,58 @@ export function translationKey (component: unknown): string | null {
   return typeof key === 'string' ? key : null
 }
 
+/** What the session knows about the connection at the moment it was kicked. */
+export interface KickContext {
+  auth: AuthMode
+  /** the kick arrived after the player had entered the world */
+  loggedIn: boolean
+  /** a private-server login was answered with a request to verify the account (an encryption request) */
+  askedToVerify: boolean
+}
+
+const AUTH_REQUIRED_REASON = 'This server only accepts verified Microsoft accounts (it is running in online mode), so it refused this name.'
+
 /**
  * Classify a kick. `component` is the raw reason from the server, `text` the flattened,
- * translated text of it.
+ * translated text of it. With `ctx`, account-related kicks are decided by what happened on the
+ * wire instead of by the wording, which varies with the server software and its language.
  */
-export function classifyKick (component: unknown, text: string): Classified {
+export function classifyKick (component: unknown, text: string, ctx?: KickContext): Classified {
   const key = translationKey(component)
+  const detail = text || key || undefined
+  let found: Classified = { kind: 'kicked', reason: text || 'Kicked by server', detail }
   for (const rule of KICK_RULES) {
     if ((key && rule.keys?.includes(key)) || (rule.text && rule.text.test(text))) {
-      return { kind: rule.kind, reason: rule.reason ?? (text || 'Kicked by server'), detail: text || key || undefined }
+      found = { kind: rule.kind, reason: rule.reason ?? (text || 'Kicked by server'), detail }
+      break
     }
   }
-  return { kind: 'kicked', reason: text || 'Kicked by server', detail: text || key || undefined }
+  if (!ctx || ctx.loggedIn) return found
+  const said = text || key || 'no reason given'
+
+  if (ctx.auth === 'offline') {
+    // Verifying an account is impossible without the encryption handshake, so the handshake — not
+    // the message — tells us whether the server wanted a verified account.
+    if (ctx.askedToVerify && (found.kind === 'kicked' || found.kind === 'auth-required')) {
+      return { kind: 'auth-required', reason: AUTH_REQUIRED_REASON, detail }
+    }
+    if (!ctx.askedToVerify && found.kind === 'auth-required') {
+      return {
+        kind: 'kicked',
+        reason: `The server could not complete the login (“${said}”). It did not ask for account verification, so this is a problem on the server itself — usually a plugin failing while a player logs in. The server console will show the cause.`,
+        detail
+      }
+    }
+    return found
+  }
+
+  // A Microsoft account was presented and the server still could not verify it.
+  if (found.kind === 'auth-required') {
+    return {
+      kind: 'kicked',
+      reason: `The server could not verify this Microsoft session (“${said}”). This is usually temporary — try again. If it keeps happening, check that no VPN or proxy sits between this computer and the server, or sign out under Profiles and sign in again.`,
+      detail
+    }
+  }
+  return found
 }

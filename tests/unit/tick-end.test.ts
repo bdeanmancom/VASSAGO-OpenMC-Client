@@ -77,12 +77,25 @@ describe('tick-end guard', () => {
     expect(h.guard.sent - before).toBe(20)
   })
 
+  it('steps aside when the protocol library starts ending ticks itself', () => {
+    const h = harness()
+    // a future library version: "move, tick_end" written by the library every tick
+    for (let tick = 0; tick < 4; tick++) { h.guard.onClientTick(); h.write('position'); h.write('tick_end'); h.advance(50) }
+    // only the very first client tick (before the library was seen) came from the guard
+    expect(h.wire).toEqual(['tick_end', 'position', 'tick_end', 'position', 'tick_end', 'position', 'tick_end', 'position', 'tick_end'])
+    expect(h.guard.sent).toBe(1)
+    // the invariant is still enforced if the library ever sends two position packets in one tick
+    h.write('position'); h.write('position_look')
+    expect(serverAccepts(h.wire)).toBe(true)
+  })
+
   it('never lets a random packet stream violate the server rule', () => {
     let seed = 42
     const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296 }
-    const names = ['position', 'position_look', 'look', 'flying', 'teleport_confirm', 'chat', 'keep_alive']
+    const NAMES = (run: number) => ['position', 'position_look', 'look', 'flying', 'teleport_confirm', 'chat', 'keep_alive', ...(run % 5 === 0 ? ['tick_end'] : [])]
     for (let run = 0; run < 50; run++) {
       const h = harness()
+      const names = NAMES(run)
       for (let i = 0; i < 400; i++) {
         const r = rnd()
         if (r < 0.25) h.guard.onClientTick()

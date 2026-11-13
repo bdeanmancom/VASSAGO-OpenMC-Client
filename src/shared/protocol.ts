@@ -145,8 +145,26 @@ export const FACE_VECTORS: readonly (readonly [number, number, number])[] = [
   [0, -1, 0], [0, 1, 0], [0, 0, -1], [0, 0, 1], [-1, 0, 0], [1, 0, 0]
 ]
 
-/** Versions that have passed the integration suite against a real server. */
+/** Versions the client speaks that have passed the integration suite against a real server of that version. */
 export const VERIFIED_VERSIONS: readonly string[] = ['1.21.4', '1.21.11']
+
+/**
+ * Newer server versions the client cannot speak itself, but which have passed the integration
+ * suite through the server's own ViaVersion/ViaBackwards translation (the client speaks `as`).
+ */
+export const VERIFIED_TRANSLATED: readonly { server: string, as: string }[] = [
+  { server: '26.3', as: '26.1' }
+]
+
+/**
+ * Has this combination passed the integration suite? `spoken` is the version the client will
+ * speak; `serverVersion` is set when the server runs something else and translates for us.
+ */
+export function isVerified (spoken: string | null | undefined, serverVersion?: string): boolean {
+  if (!spoken) return false
+  if (serverVersion) return VERIFIED_TRANSLATED.some(t => t.server === serverVersion && t.as === spoken)
+  return VERIFIED_VERSIONS.includes(spoken)
+}
 
 export interface PingResult {
   online: boolean
@@ -161,5 +179,11 @@ export interface PingResult {
   resolvedVersion?: string
   supported?: boolean
   verified?: boolean
+  /**
+   * Set when the server says it runs a different game version than the one we would speak —
+   * i.e. it admits older clients through a translation layer such as ViaVersion/ViaBackwards
+   * (which answers status pings with the pinging client's own protocol number).
+   */
+  serverVersion?: string
   error?: string
 }

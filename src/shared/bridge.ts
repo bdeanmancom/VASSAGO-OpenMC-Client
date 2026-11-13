@@ -12,6 +12,8 @@ export interface AppInfo {
   arch: string
   supportedVersions: string[]
   verifiedVersions: string[]
+  /** newer server versions verified through the server's own translation layer */
+  verifiedTranslated: { server: string, as: string }[]
   secureStorage: boolean
   userData: string
 }

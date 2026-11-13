@@ -3,7 +3,7 @@
  * PrismarineJS data tables; this module decides which game version to speak
  * and whether it is one we have actually verified.
  */
-import { VERIFIED_VERSIONS, type PingResult } from '../shared/protocol'
+import { isVerified, type PingResult } from '../shared/protocol'
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const mc = require('minecraft-protocol')
@@ -49,6 +49,7 @@ export async function pingServer (host: string, port: number, timeoutMs = 6000):
     ])
     const protocol: number | undefined = res?.version?.protocol
     const resolved = protocol != null ? versionForProtocol(protocol) : null
+    const serverVersion = translatedServerVersion(res?.version?.name, resolved, protocol)
     return {
       online: true,
       latency: res.latency,
@@ -59,12 +60,32 @@ export async function pingServer (host: string, port: number, timeoutMs = 6000):
       motd: motdToString(res?.description),
       favicon: typeof res?.favicon === 'string' && res.favicon.startsWith('data:image/png;base64,') ? res.favicon : undefined,
       resolvedVersion: resolved ?? undefined,
+      serverVersion,
       supported: resolved != null,
-      verified: resolved != null && VERIFIED_VERSIONS.includes(resolved)
+      verified: isVerified(resolved, serverVersion)
     }
   } catch (err: any) {
     return { online: false, error: err?.code ?? err?.message ?? String(err) }
   }
+}
+
+/**
+ * When the status response names exactly one game version and it is not the one we would speak
+ * (nor another release with the same protocol), the server is translating for us. Returns that
+ * named version, otherwise undefined. Names that list a range ("1.8-1.21") are ignored.
+ */
+export function translatedServerVersion (name: unknown, resolved: string | null, protocol: number | undefined): string | undefined {
+  if (typeof name !== 'string' || !resolved) return undefined
+  const found = name.replace(/§./g, '').match(/\d+\.\d+(?:\.\d+)?/g) ?? []
+  if (found.length !== 1) return undefined
+  const named = found[0]
+  if (named === resolved) return undefined
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const known = require('minecraft-data').versionsByMinecraftVersion.pc[named]
+    if (known && known.version === protocol) return undefined // e.g. 26.1.2 and 26.1 share a protocol
+  } catch {}
+  return named
 }
 
 /** Decide which version to use for a connection. Throws a descriptive error when unsupported. */

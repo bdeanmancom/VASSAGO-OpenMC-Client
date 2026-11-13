@@ -33,6 +33,47 @@ export interface SessionHost {
 
 const CONNECT_TIMEOUT_MS = 30000
 
+/** State shared between one connect() call and the callbacks it hands to the libraries. */
+export interface Attempt {
+  abandoned: boolean
+  /** the options object given to the protocol library (it reads `connect` from it when sign-in ends) */
+  options: any
+  /** the Microsoft sign-in in progress for this attempt, if any */
+  authflow?: any
+}
+
+/**
+ * A client that has been torn down must never open a connection afterwards. Two things can still
+ * be pending inside the protocol library at that point: a DNS lookup that connects when it
+ * returns, and a Microsoft sign-in that connects when the user finishes it in the browser. Either
+ * would log a player in to the server with nothing on screen.
+ */
+export function neutralize (client: any): void {
+  if (!client) return
+  try {
+    client.setSocket = (socket: any) => {
+      try { socket?.on?.('error', () => {}); socket?.destroy?.() } catch {}
+    }
+  } catch {}
+}
+
+/**
+ * Wind down the Microsoft sign-in of an abandoned attempt: it may no longer connect, and its
+ * polling is told to stop. The library re-arms its stop flag for every new code, hence the delayed
+ * repeat; with a custom application ID there is no flag and the poll simply runs out with the
+ * code. Either way the attempt stays inert: no window, no connection, nothing saved.
+ */
+export function stopSignIn (attempt: Attempt, client?: any): void {
+  if (attempt.options) attempt.options.connect = () => {}
+  if (client?.authflow) attempt.authflow = client.authflow
+  const msa = attempt.authflow?.msa
+  if (!msa) return
+  const stop = () => { try { msa.polling = false } catch {} }
+  stop()
+  const timer = setTimeout(stop, 250)
+  timer.unref?.()
+}
+
 export class GameSession {
   private bot: any = null
   private opts: ConnectOptions | null = null
@@ -57,6 +98,10 @@ export class GameSession {
   private undoTickEnd: (() => void) | null = null
   private spawned = false
   private chatMessageFor: any = null
+  /** The connect() call that is current. Anything left over from an earlier one must stay inert. */
+  private attempt: Attempt | null = null
+  /** The server answered an unverified (private-server) login with a request to verify the account. */
+  private askedToVerify = false
 
   constructor (private readonly host: SessionHost) {}
 
@@ -80,7 +125,13 @@ export class GameSession {
     if (!this.loggedIn) return
     switch (cmd.t) {
       case 'controls': this.applyControls(cmd.c); break
-      case 'look': bot.look(cmd.yaw, cmd.pitch, true).catch(() => {}); break
+      case 'look':
+        // A non-finite angle would be sent to the server as-is, and every server version answers that
+        // with the "Invalid move player packet received" kick.
+        if (Number.isFinite(cmd.yaw) && Number.isFinite(cmd.pitch)) {
+          bot.look(cmd.yaw, Math.max(-Math.PI / 2, Math.min(Math.PI / 2, cmd.pitch)), true).catch(() => {})
+        }
+        break
       case 'chat': {
         const text = cmd.text.slice(0, 256)
         if (text.trim().length > 0) bot.chat(text)
@@ -107,12 +158,17 @@ export class GameSession {
   // ---------------------------------------------------------------- connect
 
   async connect (opts: ConnectOptions): Promise<void> {
-    if (this.bot) this.teardown()
+    this.teardown()
+    // One token per call. A cancelled or replaced attempt is marked abandoned by teardown(); every
+    // await and every late callback below checks it, so an old attempt can never come back to life.
+    const attempt: Attempt = { abandoned: false, options: null }
+    this.attempt = attempt
     this.opts = opts
     this.ended = false
     this.loggedIn = false
     this.spawned = false
     this.lastReason = null
+    this.askedToVerify = false
     this.tick = 0
     this.emit({ t: 'phase', phase: opts.auth === 'microsoft' ? 'authenticating' : 'connecting', detail: `${opts.host}:${opts.port}` })
 
@@ -120,10 +176,11 @@ export class GameSession {
     try {
       version = await resolveVersion(opts.host, opts.port, opts.version)
     } catch (err: any) {
+      if (attempt.abandoned) return
       this.finish(classifyError(err, opts.auth), false)
       return
     }
-    if (this.ended) return
+    if (attempt.abandoned || this.ended) return
     this.log('info', `connecting to ${opts.host}:${opts.port} as ${opts.username} (${opts.auth}), version ${version}`)
 
     const botOptions: any = {
@@ -143,11 +200,15 @@ export class GameSession {
     }
     if (opts.auth === 'microsoft') {
       botOptions.onMsaCode = (data: any) => {
+        // A sign-in the user walked away from keeps running inside the library and asks for fresh
+        // codes; those must never reach the screen of whatever the user is doing now.
+        if (attempt.abandoned) { stopSignIn(attempt); return }
         this.emit({ t: 'msaCode', userCode: data.user_code, verificationUri: data.verification_uri, expiresIn: data.expires_in })
       }
-      botOptions.profilesFolder = this.makeTokenCache()
+      botOptions.profilesFolder = this.makeTokenCache(attempt)
       if (opts.msaClientId) { botOptions.authTitle = opts.msaClientId; botOptions.flow = 'msal' }
     }
+    attempt.options = botOptions
 
     let bot: any
     try {
@@ -158,6 +219,7 @@ export class GameSession {
     }
     this.bot = bot
     this.connectTimer = setTimeout(() => {
+      if (attempt.abandoned) return
       if (!this.loggedIn && opts.auth !== 'microsoft') {
         this.lastReason = { kind: 'network', reason: 'Connection timed out — the server did not respond in time.', kicked: false }
         try { bot.end('timeout') } catch {}
@@ -168,7 +230,7 @@ export class GameSession {
   }
 
   /** prismarine-auth cache backed by the host's encrypted store instead of plain files. */
-  private makeTokenCache () {
+  private makeTokenCache (attempt: Attempt) {
     const store = this.host.secureStore
     const mem = new Map<string, any>()
     return ({ cacheName, username }: { cacheName: string, username: string }) => {
@@ -180,7 +242,11 @@ export class GameSession {
         mem.set(key, v)
         return v
       }
-      const save = async (v: any) => { mem.set(key, v); await store?.set(key, JSON.stringify(v)) }
+      const save = async (v: any) => {
+        mem.set(key, v)
+        // A sign-in that completes after the user cancelled it is not kept.
+        if (!attempt.abandoned) await store?.set(key, JSON.stringify(v))
+      }
       return {
         async reset () { await save({}) },
         async getCached () { return await load() },
@@ -328,16 +394,30 @@ export class GameSession {
     bot.on('diggingAborted', guard((b: any) => { this.digging = false; this.emit({ t: 'dig', x: b.position.x, y: b.position.y, z: b.position.z, state: 'cancel', timeMs: 0 }) }))
 
     // --- lifecycle
+    // A server (or proxy) that answers a private-server login with an encryption request is asking
+    // for account verification. This is the one signal that does not depend on the kick wording or
+    // on the language the server is set to.
+    client.once('encryption_begin', guard((p: any) => {
+      if (this.opts?.auth === 'offline' && p?.shouldAuthenticate !== false) this.askedToVerify = true
+    }))
     bot.on('kicked', guard((reason: any) => {
-      this.lastReason = { ...classifyKick(reason, this.text(reason)), kicked: true }
+      this.lastReason = {
+        ...classifyKick(reason, this.text(reason), { auth: this.opts?.auth ?? 'offline', loggedIn: this.loggedIn, askedToVerify: this.askedToVerify }),
+        kicked: true
+      }
     }))
     bot.on('error', guard((err: any) => {
       this.log('warn', `connection error: ${err?.message ?? err}`)
-      if (!this.lastReason) this.lastReason = { ...classifyError(err, this.opts?.auth ?? 'offline'), kicked: false }
-      if (!this.loggedIn) {
-        if (this.lastReason.kind === 'ms-no-java-profile') void this.finishAfterLicenceCheck(bot, this.lastReason)
-        else this.finish(this.lastReason, this.lastReason.kicked)
+      const why = { ...classifyError(err, this.opts?.auth ?? 'offline'), kicked: false }
+      if (this.loggedIn) {
+        // Once in the world most errors are survivable (one unreadable packet, a failed handler).
+        // Only a network failure is worth remembering as the reason if the connection then ends.
+        if (!this.lastReason && why.kind === 'network') this.lastReason = why
+        return
       }
+      if (!this.lastReason) this.lastReason = why
+      if (this.lastReason.kind === 'ms-no-java-profile') void this.finishAfterLicenceCheck(bot, this.lastReason)
+      else this.finish(this.lastReason, this.lastReason.kicked)
     }))
     bot.on('end', guard((why: string) => {
       if (this.diagnosing) return
@@ -398,7 +478,9 @@ export class GameSession {
     this.flushTimer = null
     this.connectTimer = null
     const bot = this.bot
+    const attempt = this.attempt
     this.bot = null
+    this.attempt = null
     this.loggedIn = false
     try { this.undoTickEnd?.() } catch {}
     this.undoTickEnd = null
@@ -409,11 +491,16 @@ export class GameSession {
     this.digging = false
     this.diagnosing = false
     this.pendingPacks = []
+    if (attempt) {
+      attempt.abandoned = true
+      stopSignIn(attempt, bot?._client)
+    }
     if (bot) {
       try { bot.removeAllListeners() } catch {}
       try { bot._client.removeAllListeners('block_change'); bot._client.removeAllListeners('multi_block_change') } catch {}
       // Keep an error sink so late socket errors never crash the host process.
       try { bot._client.on('error', () => {}); bot.on('error', () => {}) } catch {}
+      neutralize(bot._client)
       try { bot._client.end() } catch {}
     }
   }

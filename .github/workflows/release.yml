@@ -1,0 +1,79 @@
+name: Release
+
+# Builds the installers on all three platforms and attaches them to a GitHub Release.
+# Run it from the Actions tab (or `gh workflow run release.yml -f tag=v0.2.0`), or push a v* tag.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to create or update, e.g. v0.2.0'
+        required: true
+        type: string
+      prerelease:
+        description: 'Mark as a pre-release'
+        type: boolean
+        default: true
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux, os: ubuntu-latest, script: 'dist:linux' }
+          - { name: windows, os: windows-latest, script: 'dist:win' }
+          - { name: macos, os: macos-latest, script: 'dist:mac' }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: Build installers
+        run: npm run ${{ matrix.script }}
+        env:
+          # Unsigned unless signing secrets are configured; see docs/PACKAGING.md.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.name }}
+          path: |
+            release/*.AppImage
+            release/*.exe
+            release/*.dmg
+            release/*-mac-*.zip
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: release-*
+          merge-multiple: true
+      - name: Checksums
+        run: cd artifacts && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          target_commitish: ${{ github.sha }}
+          name: Vassago ${{ inputs.tag || github.ref_name }}
+          prerelease: ${{ (github.event_name == 'workflow_dispatch' && inputs.prerelease) || (github.event_name != 'workflow_dispatch' && contains(github.ref_name, '-')) }}
+          body_path: docs/RELEASE_NOTES.md
+          files: artifacts/*
+          fail_on_unmatched_files: true

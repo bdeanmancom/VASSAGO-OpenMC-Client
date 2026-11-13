@@ -8,8 +8,11 @@ function VersionBadge ({ ping }: { ping: PingResult | 'loading' | undefined }) {
   if (!ping || ping === 'loading') return <span className="badge muted">…</span>
   if (!ping.online) return <span className="badge danger">Offline</span>
   if (!ping.supported) return <span className="badge danger" title={`Protocol ${ping.protocol} is not supported by this build`}>{cleanVersion(ping.versionName)} · unsupported</span>
-  if (ping.verified) return <span className="badge ok" title="This version passes Vassago's integration test suite">{ping.resolvedVersion} · verified</span>
-  return <span className="badge warn" title="Supported by the protocol library but not yet verified by Vassago's integration tests">{ping.resolvedVersion} · experimental</span>
+  // A server that says it runs another version than the one we speak is translating for us (ViaVersion/ViaBackwards).
+  const label = ping.serverVersion ? `${ping.serverVersion} · joins as ${ping.resolvedVersion}` : ping.resolvedVersion
+  const via = ping.serverVersion ? ` The server runs ${ping.serverVersion} and admits older clients through a translation layer; Vassago connects as ${ping.resolvedVersion}.` : ''
+  if (ping.verified) return <span className="badge ok" title={`This version passes Vassago's integration test suite.${via}`}>{label} · verified</span>
+  return <span className="badge warn" title={`Supported by the protocol library but not yet verified by Vassago's integration tests.${via}`}>{label} · experimental</span>
 }
 
 function cleanVersion (v?: string) { return (v ?? 'unknown').replace(/§./g, '').slice(0, 24) }
@@ -42,6 +45,10 @@ export function PlayPage ({ ctx }: { ctx: AppCtx }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [featured?.host, featured?.port])
   const fp = featured ? pings[addrKey(featured.host, featured.port)] : undefined
+  // A server joined with a non-default profile remembers that choice; everything else follows the default.
+  const pinned = (id: string | undefined) => id ? config.profiles.find(x => x.id === id) : undefined
+  const featuredProfile = (last && pinned(last.pinnedProfileId)) || activeProfile
+  const modeLabel = (auth: string) => auth === 'microsoft' ? 'Microsoft account' : 'private-server profile'
 
   return (
     <div className="page play-page">
@@ -70,10 +77,11 @@ export function PlayPage ({ ctx }: { ctx: AppCtx }) {
             : <p className="hero-lead">Add a server or connect directly to start playing. Vassago speaks the Java Edition protocol with its own engine and original art — no game installation required.</p>}
           <div className="hero-actions">
             {featured
-              ? <button className="btn primary big" data-testid="play-featured" onClick={() => launch(featured)}><Icon name="play" size={20} />Play</button>
+              ? <button className="btn primary big" data-testid="play-featured" onClick={() => launch(featured, featuredProfile)}><Icon name="play" size={20} />Play</button>
               : <button className="btn primary big" onClick={() => navigate('direct')}><Icon name="direct" size={20} />Direct Connect</button>}
             <button className="btn big" onClick={() => navigate('servers')}><Icon name="servers" size={20} />Browse servers</button>
           </div>
+          {featured && <div className="hero-identity" data-testid="play-identity">Joins as <b>{featuredProfile.username}</b> · {modeLabel(featuredProfile.auth)} · <button className="link" onClick={() => navigate('profiles')}>change</button></div>}
         </div>
       </section>
 
@@ -85,12 +93,13 @@ export function PlayPage ({ ctx }: { ctx: AppCtx }) {
             <div className="recent-grid">
               {config.recents.map(r => {
                 const p = pings[addrKey(r.host, r.port)]
+                const as = pinned(r.pinnedProfileId)
                 return (
-                  <button key={addrKey(r.host, r.port)} className="recent-card" onClick={() => launch({ host: r.host, port: r.port, name: r.name }, config.profiles.find(x => x.id === r.profileId))}>
+                  <button key={addrKey(r.host, r.port)} className="recent-card" onClick={() => launch({ host: r.host, port: r.port, name: r.name }, as)}>
                     <ServerIcon ping={p} name={r.name} />
                     <span className="recent-text">
                       <span className="recent-name">{r.name}</span>
-                      <span className="recent-meta">{addrLabel(r.host, r.port)} · {timeAgo(r.at)}</span>
+                      <span className="recent-meta">{addrLabel(r.host, r.port)} · {timeAgo(r.at)}{as && as.id !== activeProfile.id ? ` · as ${as.username}` : ''}</span>
                     </span>
                     <PingBars ping={p} />
                   </button>
@@ -277,13 +286,24 @@ export function DirectPage ({ ctx }: { ctx: AppCtx }) {
 export function ProfilesPage ({ ctx }: { ctx: AppCtx }) {
   const { config, update, info, toast } = ctx
   const [adding, setAdding] = useState<'offline' | 'microsoft' | null>(null)
+  const [renaming, setRenaming] = useState<Profile | null>(null)
   const [username, setUsername] = useState('')
-  const valid = adding === 'microsoft' ? username.trim().length >= 3 : isValidUsername(username)
-  const add = () => {
-    if (!adding || !valid) return
-    const p: Profile = { id: newId(), name: username.trim(), username: username.trim(), auth: adding }
-    update(c => ({ ...c, profiles: [...c.profiles, p], activeProfileId: p.id }))
-    setAdding(null); setUsername('')
+  const mode = renaming?.auth ?? adding
+  const taken = mode === 'offline' && config.profiles.some(p => p.auth === 'offline' && p.id !== renaming?.id && p.username.toLowerCase() === username.trim().toLowerCase())
+  const valid = (mode === 'microsoft' ? username.trim().length >= 3 : isValidUsername(username)) && !taken
+  const close = () => { setAdding(null); setRenaming(null); setUsername('') }
+  const save = () => {
+    if (!mode || !valid) return
+    const name = username.trim()
+    if (renaming) {
+      update(c => ({ ...c, profiles: c.profiles.map(p => p.id === renaming.id ? { ...p, name, username: name } : p) }))
+    } else {
+      const p: Profile = { id: newId(), name, username: name, auth: mode }
+      // A new private-server name becomes the default. A Microsoft account is only used where it is
+      // asked for, unless the player makes it the default themselves.
+      update(c => ({ ...c, profiles: [...c.profiles, p], activeProfileId: p.auth === 'offline' ? p.id : c.activeProfileId }))
+    }
+    close()
   }
   const remove = (p: Profile) => {
     if (config.profiles.length <= 1) { toast('Keep at least one profile.'); return }
@@ -296,52 +316,55 @@ export function ProfilesPage ({ ctx }: { ctx: AppCtx }) {
   return (
     <div className="page">
       <header className="page-head">
-        <div><h1>Profiles</h1><p className="sub">Who you play as. Two clearly separate modes: private-server names and verified Microsoft accounts.</p></div>
+        <div><h1>Profiles</h1><p className="sub">Who you play as. For your own or a friend’s offline-mode server, a private-server name is all you need.</p></div>
         <div className="head-actions">
-          <button className="btn" data-testid="add-offline" onClick={() => { setAdding('offline'); setUsername('') }}><Icon name="user" />Private server profile</button>
-          <button className="btn" data-testid="add-microsoft" onClick={() => { setAdding('microsoft'); setUsername('') }}><Icon name="ms" />Microsoft account</button>
+          <button className="btn primary" data-testid="add-offline" onClick={() => { setAdding('offline'); setUsername('') }}><Icon name="plus" />New private-server name</button>
+          <button className="btn" data-testid="add-microsoft" onClick={() => { setAdding('microsoft'); setUsername('') }}><Icon name="ms" />Add a Microsoft account</button>
         </div>
       </header>
       <div className="profile-list">
         {config.profiles.map(p => (
-          <div key={p.id} className={`profile-card ${p.id === config.activeProfileId ? 'active' : ''}`}>
+          <div key={p.id} className={`profile-card ${p.id === config.activeProfileId ? 'active' : ''}`} data-testid="profile-card">
             <span className="avatar lg" style={{ ['--h' as any]: hue(p.username) }}>{p.username.slice(0, 1).toUpperCase()}</span>
             <div className="profile-card-text">
               <div className="profile-card-name">{p.username}</div>
               <div className="profile-card-mode">{p.auth === 'microsoft'
-                ? <><Icon name="ms" size={13} /> Official account · signs in with Microsoft when you connect</>
-                : <><Icon name="user" size={13} /> Private server mode · no account verification</>}</div>
+                ? <><Icon name="ms" size={13} /> Microsoft account · signs in with Microsoft when you connect</>
+                : <><Icon name="user" size={13} /> Private-server name · no account verification</>}</div>
             </div>
             {p.id === config.activeProfileId
-              ? <span className="badge ok"><Icon name="check" size={12} /> Active</span>
-              : <button className="btn" onClick={() => update(c => ({ ...c, activeProfileId: p.id }))}>Use</button>}
+              ? <span className="badge ok"><Icon name="check" size={12} /> Default</span>
+              : <button className="btn" data-testid="use-profile" onClick={() => update(c => ({ ...c, activeProfileId: p.id }))}>Make default</button>}
+            {p.auth === 'offline' && <button className="icon-btn" data-testid="rename-profile" title="Change name" onClick={() => { setRenaming(p); setUsername(p.username) }}><Icon name="edit" /></button>}
             <button className="icon-btn" title={p.auth === 'microsoft' ? 'Sign out and remove' : 'Remove'} onClick={() => remove(p)}><Icon name="trash" /></button>
           </div>
         ))}
       </div>
       <div className="two-col">
         <div className="notice"><Icon name="shield" size={20} /><div>
-          <b>Private server mode</b>
-          <p>Pick any display name and join servers that have explicitly turned off account verification (offline mode). Names aren’t protected there — owners should add a login plugin, allow-list or an authenticating proxy. Vassago will not try to get around verification on servers that require it.</p>
+          <b>Private-server names</b>
+          <p>Pick any name and join servers that have explicitly turned off account verification (offline mode). On a whitelisted server the name has to match the whitelist exactly. Names aren’t protected there — owners should add a login plugin, allow-list or an authenticating proxy. Vassago will not try to get around verification on servers that require it.</p>
         </div></div>
         <div className="notice"><Icon name="ms" size={20} /><div>
-          <b>Official account mode</b>
-          <p>Uses Microsoft’s device-code sign-in: you enter a short code on microsoft.com in your own browser. Vassago never sees your password. Game ownership is checked by Microsoft/Mojang services, and tokens are {info?.secureStorage === false ? 'kept in memory only on this system (no OS keychain available)' : 'stored encrypted with your operating system’s keychain'}.</p>
+          <b>Microsoft accounts</b>
+          <p>Only needed for servers that verify accounts (online mode). Uses Microsoft’s device-code sign-in: you enter a short code on microsoft.com in your own browser. Vassago never sees your password. Game ownership is checked by Microsoft/Mojang services, and tokens are {info?.secureStorage === false ? 'kept in memory only on this system (no OS keychain available)' : 'stored encrypted with your operating system’s keychain'}.</p>
         </div></div>
       </div>
-      {adding && (
+      {mode && (
         <Modal
-          title={adding === 'offline' ? 'New private server profile' : 'Add Microsoft account'} onClose={() => setAdding(null)}
-          actions={<><button className="btn ghost" onClick={() => setAdding(null)}>Cancel</button><button className="btn primary" data-testid="save-profile" disabled={!valid} onClick={add}>Add profile</button></>}
+          title={renaming ? 'Change name' : mode === 'offline' ? 'New private-server name' : 'Add a Microsoft account'} onClose={close}
+          actions={<><button className="btn ghost" onClick={close}>Cancel</button><button className="btn primary" data-testid="save-profile" disabled={!valid} onClick={save}>{renaming ? 'Save' : 'Add profile'}</button></>}
         >
-          {adding === 'offline'
+          {mode === 'offline'
             ? <>
-              <label className="field"><span>Display username</span><input autoFocus data-testid="profile-username" value={username} maxLength={16} onChange={e => setUsername(e.target.value)} placeholder="3–16 letters, digits or _" spellCheck={false} onKeyDown={e => { if (e.key === 'Enter') add() }} /></label>
-              {username && !valid && <p className="danger-text">Usernames must be 3–16 characters: letters, digits and underscores only.</p>}
+              <label className="field"><span>Username</span><input autoFocus data-testid="profile-username" value={username} maxLength={16} onChange={e => setUsername(e.target.value)} placeholder="3–16 letters, digits or _" spellCheck={false} onKeyDown={e => { if (e.key === 'Enter') save() }} /></label>
+              {username && !isValidUsername(username) && <p className="danger-text">Usernames must be 3–16 characters: letters, digits and underscores only.</p>}
+              {taken && <p className="danger-text">You already have a profile with this name.</p>}
+              {renaming && <p className="muted">On offline-mode servers your inventory, permissions and whitelist entry belong to the name, so a renamed profile arrives as a new player.</p>}
               </>
             : <>
-              <label className="field"><span>Account e-mail or label</span><input autoFocus value={username} onChange={e => setUsername(e.target.value)} placeholder="you@example.com" spellCheck={false} onKeyDown={e => { if (e.key === 'Enter') add() }} /></label>
-              <p className="muted">Used only to keep this account’s sign-in separate on this device. The first time you connect you’ll be shown a code to enter at microsoft.com/link.</p>
+              <label className="field"><span>Account e-mail or label</span><input autoFocus value={username} onChange={e => setUsername(e.target.value)} placeholder="you@example.com" spellCheck={false} onKeyDown={e => { if (e.key === 'Enter') save() }} /></label>
+              <p className="muted">Used only to keep this account’s sign-in separate on this device. The first time you connect with it you’ll be shown a code to enter at microsoft.com/link. You only need this for servers that verify accounts.</p>
               </>}
         </Modal>
       )}
@@ -439,8 +462,9 @@ export function AboutPage ({ ctx }: { ctx: AppCtx }) {
         <p>Vassago only claims support for versions that pass its automated integration suite against a real server.</p>
         <div className="chips">
           {versions.map(v => <span key={v} className={`badge ${info?.verifiedVersions.includes(v) ? 'ok' : 'muted'}`} title={info?.verifiedVersions.includes(v) ? 'Verified by integration tests' : 'Protocol data available; not yet verified'}>{v}{info?.verifiedVersions.includes(v) ? ' · verified' : ''}</span>)}
+          {(info?.verifiedTranslated ?? []).map(t => <span key={`via-${t.server}`} className="badge ok" data-testid="verified-translated" title={`Verified by integration tests against a ${t.server} server that admits older clients through ViaVersion/ViaBackwards. Vassago joins it as ${t.as}.`}>{t.server} · verified via server translation (as {t.as})</span>)}
         </div>
-        <p className="muted">Unverified versions may connect but are experimental.</p>
+        <p className="muted">Unverified versions may connect but are experimental. Server versions newer than the list are only reachable when the server itself translates for older clients (ViaVersion with ViaBackwards).</p>
       </div>
       <div className="card about-card">
         <h3>Independent &amp; original</h3>

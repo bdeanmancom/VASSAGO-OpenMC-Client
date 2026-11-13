@@ -7,12 +7,15 @@ import type { DisconnectKind } from './protocol'
 /** Steps for someone who runs the server and wants private-server (offline-mode) profiles to join. */
 export const OWNER_STEPS: readonly string[] = [
   'Stop the server.',
-  'Open server.properties and set online-mode=false. If players reach the server through a Velocity or BungeeCord proxy, change the proxy’s own online-mode setting instead. Some hosting panels overwrite this file — change it in the panel if yours does.',
-  'Start the server again. It has to be a full restart; a reload does not apply this setting.',
+  'Open server.properties and set online-mode=false. If players reach the server through a proxy, change the proxy’s setting instead (velocity.toml: online-mode, BungeeCord config.yml: online_mode). Hosting panels and containers often overwrite the file — change it there if yours does (for example an ONLINE_MODE variable or a “cracked” switch).',
+  'Start the server again. It has to be a full restart; a reload does not apply this setting. The console then prints “SERVER IS RUNNING IN OFFLINE/INSECURE MODE”.',
   'Keep the server restricted. With online mode off nothing proves who a player is — anyone who can reach the server can join under any name, including an operator’s, and a name whitelist does not prevent that. Use a firewall / IP allow-list or a login plugin.'
 ]
 
-export const OWNER_NOTE = 'Players get different internal IDs in offline mode, so existing inventories, operator status and whitelist entries will not carry over automatically.'
+export const OWNER_NOTE = 'Players get different internal IDs in offline mode, so existing inventories, operator status and whitelist entries will not carry over automatically — add the names to the whitelist and operator list again after the switch.'
+
+/** Shown with the steps: the one case where the server is already in offline mode and still asks. */
+export const NAME_RESERVED_NOTE = 'Already off? Then a login plugin or the proxy is treating this name as a paid account’s and asking that account to prove itself. Join under a different name.'
 
 export function ownerStepsText (server: string): string {
   return [

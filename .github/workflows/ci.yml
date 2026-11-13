@@ -14,13 +14,29 @@ permissions:
 
 jobs:
   test:
-    name: Typecheck, unit, integration and end-to-end tests
+    name: Tests (${{ matrix.name }})
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # A server the client speaks to natively.
+          - { id: paper-1.21.11, name: 'Paper 1.21.11', version: '1.21.11', client: '1.21.11', via: '0', java: '21', soak: '0', force: '', e2e: '1' }
+          # A current server that admits older clients through ViaVersion/ViaBackwards:
+          # the client speaks 26.1, the server runs 26.3 (which enforces client tick ends).
+          - { id: paper-26.3-via, name: 'Paper 26.3 + ViaBackwards', version: '26.3', client: '26.1', via: '1', java: '25', soak: '2', force: '', e2e: '1' }
+          # The same server with the client made to speak 1.21.11 (the app itself always negotiates;
+          # this keeps the older protocol path through ViaBackwards honest). Headless suite only.
+          - { id: paper-26.3-via-as-1.21.11, name: 'Paper 26.3 + ViaBackwards, client forced to 1.21.11', version: '26.3', client: '26.1', via: '1', java: '25', soak: '0', force: '1.21.11', e2e: '0' }
     env:
       # The harness starts loopback-only PaperMC servers, which requires accepting the
       # Minecraft EULA (https://aka.ms/MinecraftEULA).
       MC_EULA: 'true'
+      VASSAGO_TEST_VERSION: ${{ matrix.version }}
+      VASSAGO_TEST_CLIENT_VERSION: ${{ matrix.client }}
+      VASSAGO_TEST_VIA: ${{ matrix.via }}
+      VASSAGO_TEST_FORCE_VERSION: ${{ matrix.force }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -30,7 +46,7 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 21
+          java-version: ${{ matrix.java }}
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
@@ -38,19 +54,27 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .test-server/cache
-          key: paper-1.21.11
+          key: paper-${{ matrix.version }}-via${{ matrix.via }}
       - name: Integration tests (real PaperMC servers, offline + online mode)
         run: npm run test:integration
+      - name: Two-player soak
+        if: matrix.soak != '0'
+        run: npm run test:soak
+        env:
+          VASSAGO_SOAK_MINUTES: ${{ matrix.soak }}
       - name: Build
+        if: matrix.e2e == '1'
         run: npm run build
       - name: Allow the Electron sandbox on the runner
+        if: matrix.e2e == '1'
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
       - name: End-to-end test (Electron under Xvfb, software GL)
+        if: matrix.e2e == '1'
         run: xvfb-run -a -s "-screen 0 1400x900x24" npm run test:e2e
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: test-artifacts
+          name: test-artifacts-${{ matrix.id }}
           path: |
             tests/e2e/artifacts
             .test-server/*/logs/latest.log

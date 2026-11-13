@@ -40,7 +40,7 @@ export function App () {
   const [info, setInfo] = useState<AppInfo | null>(null)
   const [route, setRoute] = useState<Route>('play')
   const [pings, setPings] = useState<PingMap>({})
-  const [game, setGame] = useState<{ opts: ConnectOptions, target: Target, key: number, profileId: string } | null>(null)
+  const [game, setGame] = useState<{ opts: ConnectOptions, target: Target, key: number, profile: Profile } | null>(null)
   const [pendingOffline, setPendingOffline] = useState<{ target: Target, profile: Profile } | null>(null)
   const [toasts, setToasts] = useState<{ id: number, msg: string }[]>([])
   const pingTimes = useRef<Record<string, number>>({})
@@ -108,17 +108,19 @@ export function App () {
       viewDistance: config.settings.renderDistance,
       msaClientId: config.settings.msaClientId || null
     }
-    setGame({ opts, target, key: Date.now(), profileId: profile.id })
+    setGame({ opts, target, key: Date.now(), profile })
   }, [config])
 
-  // Only servers the player actually got into are remembered.
-  const recordJoin = useCallback((target: Target, profileId: string) => {
+  // Only servers the player actually got into are remembered — and only then is a profile that was
+  // created for this connection (see retryAs) kept.
+  const recordJoin = useCallback((target: Target, profile: Profile) => {
     update(c => ({
       ...c,
-      recents: [{ host: target.host, port: target.port, name: target.name, at: Date.now(), profileId }, ...c.recents.filter(r => addrKey(r.host, r.port) !== addrKey(target.host, target.port))].slice(0, 6),
+      profiles: c.profiles.some(p => p.id === profile.id) ? c.profiles : [...c.profiles, profile],
+      recents: [{ host: target.host, port: target.port, name: target.name, at: Date.now(), ...(profile.id !== c.activeProfileId ? { pinnedProfileId: profile.id } : {}) }, ...c.recents.filter(r => addrKey(r.host, r.port) !== addrKey(target.host, target.port))].slice(0, 6),
       // a successful join with a private-server profile proves the server no longer demands accounts
       servers: c.servers.map(s => addrKey(s.host, s.port) === addrKey(target.host, target.port)
-        ? { ...s, lastPlayed: Date.now(), requiresAccount: c.profiles.find(p => p.id === profileId)?.auth === 'offline' ? false : s.requiresAccount }
+        ? { ...s, lastPlayed: Date.now(), requiresAccount: profile.auth === 'offline' ? false : s.requiresAccount }
         : s)
     }))
   }, [update])
@@ -132,18 +134,19 @@ export function App () {
     start(target, p)
   }, [config, activeProfile, start, toast])
 
-  /** From a disconnect screen: connect to the same server again as a different kind of profile. */
+  /**
+   * From a disconnect screen: connect to the same server again as a different kind of profile.
+   * This is a choice for this connection only — it never changes which profile is the default,
+   * and a profile created here is only kept once it has actually got into a server.
+   */
   const retryAs = useCallback((mode: AuthMode, fresh = false) => {
     if (!config || !game) return
     const target = game.target
-    let profile = activeProfile?.auth === mode ? activeProfile : config.profiles.find(p => p.auth === mode && (mode === 'microsoft' || isValidUsername(p.username)))
-    if (!profile) {
-      profile = mode === 'offline'
+    const usable = (p: Profile | undefined): p is Profile => !!p && p.auth === mode && (mode === 'microsoft' || isValidUsername(p.username))
+    const chosen: Profile = [game.profile, activeProfile, ...config.profiles].find(usable) ??
+      (mode === 'offline'
         ? { id: newId(), name: 'Player', username: 'Player', auth: 'offline' }
-        : { id: newId(), name: 'Microsoft account', username: 'Microsoft account', auth: 'microsoft' }
-    }
-    const chosen = profile
-    update(c => ({ ...c, profiles: c.profiles.some(p => p.id === chosen.id) ? c.profiles : [...c.profiles, chosen], activeProfileId: chosen.id }))
+        : { id: newId(), name: 'Microsoft account', username: 'Microsoft account', auth: 'microsoft' })
     const go = () => {
       setGame(null)
       if (chosen.auth === 'offline' && !config.settings.acceptedOfflineWarning) setPendingOffline({ target, profile: chosen })
@@ -151,7 +154,7 @@ export function App () {
     }
     if (fresh && mode === 'microsoft') void window.vassago.app.signOut(chosen.username).then(go, go)
     else go()
-  }, [config, game, activeProfile, update, start])
+  }, [config, game, activeProfile, start])
 
   /** Remember whether a server turned away unverified names, so the launcher can say so up front. */
   const recordOutcome = useCallback((target: Target, kind: DisconnectKind | undefined) => {
@@ -174,7 +177,7 @@ export function App () {
             target={game.target}
             settings={config.settings}
             setSettings={setSettings}
-            onJoined={() => recordJoin(game.target, game.profileId)}
+            onJoined={() => recordJoin(game.target, game.profile)}
             onExit={() => setGame(null)}
             onReconnect={() => setGame(g => g ? { ...g, key: Date.now() } : g)}
             onRetryAs={retryAs}
@@ -238,7 +241,7 @@ export function App () {
           <ul className="bullets">
             <li>Only use this for servers you run or trust (LAN, private or whitelisted communities).</li>
             <li>Server owners should protect identities with a login/auth plugin, an IP allow-list, or by placing the server behind a trusted authenticating proxy.</li>
-            <li>Vassago never attempts to bypass authentication on servers that require a Microsoft account — use an Official Account profile for those.</li>
+            <li>Servers that verify accounts will refuse this profile, and Vassago never tries to get around that.</li>
           </ul>
         </Modal>
       )}

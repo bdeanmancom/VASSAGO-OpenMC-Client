@@ -131,6 +131,10 @@ nav { display: flex; flex-direction: column; gap: 4px; }
 .hero-server-meta { display: flex; gap: 10px; align-items: center; color: #b7bfd6; font-size: 13px; flex-wrap: wrap; }
 .hero-motd { font-size: 13px; color: #cfd5e6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hero-actions { display: flex; gap: 12px; margin-top: 8px; }
+.hero-identity { margin-top: 12px; font-size: 13px; color: #b7bfd6; }
+.hero-identity b { color: #fff; font-weight: 600; }
+button.link { background: none; border: 0; padding: 0; font: inherit; color: var(--accent, #8ea2ff); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+button.link:hover { color: #fff; }
 
 .server-icon { width: 56px; height: 56px; border-radius: 12px; flex: none; image-rendering: pixelated; background: var(--panel-3); }
 .server-icon.placeholder { --h: 230; display: grid; place-items: center; font-size: 24px; font-weight: 800; color: #fff; background: linear-gradient(135deg, hsl(var(--h) 60% 34%), hsl(calc(var(--h) + 50) 55% 24%)); border: 1px solid rgba(255, 255, 255, 0.08); }

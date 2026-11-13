@@ -1,6 +1,13 @@
 import { GameSession } from '../../src/session/session'
 import type { ConnectOptions, SessionCommand, SessionEvent } from '../../src/shared/protocol'
 
+/**
+ * Normally the client negotiates its version from the status ping, like the app does. Setting
+ * VASSAGO_TEST_FORCE_VERSION makes every test client speak that version instead — used to check
+ * older protocol versions against a newer server that translates for them (ViaBackwards).
+ */
+export const FORCED_VERSION: string | null = process.env.VASSAGO_TEST_FORCE_VERSION || null
+
 export class TestClient {
   events: SessionEvent[] = []
   session: GameSession
@@ -31,7 +38,7 @@ export class TestClient {
   send (cmd: SessionCommand) { this.session.handle(cmd) }
 
   connect (port: number, extra: Partial<ConnectOptions> = {}) {
-    this.send({ t: 'connect', opts: { host: '127.0.0.1', port, username: this.name, auth: 'offline', version: null, viewDistance: 4, ...extra } })
+    this.send({ t: 'connect', opts: { host: '127.0.0.1', port, username: this.name, auth: 'offline', version: FORCED_VERSION, viewDistance: 4, ...extra } })
   }
 
   waitFor<T extends SessionEvent['t']> (type: T, pred: (e: Extract<SessionEvent, { t: T }>) => boolean = () => true, timeout = 20000): Promise<Extract<SessionEvent, { t: T }>> {
@@ -77,6 +84,20 @@ export class TestClient {
     this.chat(`/gamemode ${mode}`)
     await changed
   }
+  /**
+   * Empty the inventory, give exactly this item and hold it (operator only). Waits for the clear to
+   * arrive before giving, so a stack left over from an earlier test is never mistaken for the new one.
+   */
+  async hold (item: string, count = 64) {
+    this.chat(`/clear ${this.name}`)
+    await this.until(() => this.window?.slots.every(s => s == null) === true, 10000, 'inventory cleared')
+    this.chat(`/give ${this.name} minecraft:${item} ${count}`)
+    const inHotbar = () => this.window?.slots.findIndex((s, i) => i >= 36 && i <= 44 && s?.name === item) ?? -1
+    await this.until(() => inHotbar() >= 36, 10000, `${item} in the hotbar`)
+    this.send({ t: 'hotbar', slot: inHotbar() - 36 })
+    await sleep(200)
+  }
+
   close () { this.send({ t: 'disconnect' }) }
 }
 

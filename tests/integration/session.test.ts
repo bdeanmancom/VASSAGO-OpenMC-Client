@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest'
-import { TestClient, sleep } from './harness'
+import { FORCED_VERSION, TestClient, sleep } from './harness'
 import { pingServer } from '../../src/session/versions'
 
 const port = inject('port')
@@ -18,7 +18,7 @@ function autoDeclinePack (c: TestClient) {
   void c.waitFor('resourcePack', () => true, 60000).then(() => c.send({ t: 'resourcePack', accept: false })).catch(() => {})
 }
 
-describe(`Paper ${version} — offline-mode server`, () => {
+describe(`Paper ${version}${FORCED_VERSION ? ` (client forced to ${FORCED_VERSION})` : ''} — offline-mode server`, () => {
   beforeAll(async () => {
     autoDeclinePack(op)
     await op.joined(port)
@@ -37,7 +37,7 @@ describe(`Paper ${version} — offline-mode server`, () => {
   it('logs in without Microsoft authentication and receives the world', async () => {
     const login = op.events.find(e => e.t === 'login') as any
     expect(login.username).toBe('VassagoOp')
-    expect(login.version).toBe(clientVersion)
+    expect(login.version).toBe(FORCED_VERSION ?? clientVersion)
     expect(login.dimension).toContain('overworld')
     expect(op.chunks.size).toBeGreaterThanOrEqual(9)
     const anyChunk = [...op.chunks.values()][0]
@@ -134,13 +134,7 @@ describe(`Paper ${version} — offline-mode server`, () => {
 
   it('places and breaks blocks, visible to the other player', async () => {
     await op.mode('creative')
-    op.chat('/clear VassagoOp')
-    op.chat('/give VassagoOp minecraft:stone 64')
-    await op.until(() => op.window?.slots.some(s => s?.name === 'stone') === true, 10000, 'stone in inventory')
-    const slot = op.window!.slots.findIndex(s => s?.name === 'stone')
-    expect(slot).toBeGreaterThanOrEqual(36)
-    op.send({ t: 'hotbar', slot: slot - 36 })
-    await sleep(200)
+    await op.hold('stone')
     const tx = px - 3; const tz = pz - 3
     const key = `${tx},${py + 1},${tz}`
     op.blocks.delete(key); bob.blocks.delete(key)
@@ -185,10 +179,7 @@ describe(`Paper ${version} — offline-mode server`, () => {
     }
     await op.mode('creative')
     await home()
-    op.chat('/clear VassagoOp')
-    op.chat('/give VassagoOp minecraft:stone 64')
-    await op.until(() => op.window?.slots.some(s => s?.name === 'stone') === true, 10000, 'stone in inventory')
-    op.send({ t: 'hotbar', slot: op.window!.slots.findIndex(s => s?.name === 'stone') - 36 })
+    await op.hold('stone')
 
     // standing completely still is what used to get the client kicked
     await sleep(4000)
@@ -276,10 +267,7 @@ describe(`Paper ${version} — offline-mode server`, () => {
     await op.mode('creative')
     op.chat(`/tp VassagoOp ${px + 0.5} ${py + 1} ${pz + 0.5}`)
     await op.until(() => Math.abs(op.pos.x - (px + 0.5)) < 0.01 && op.pos.onGround, 10000, 'teleport')
-    op.chat('/clear VassagoOp')
-    op.chat('/give VassagoOp minecraft:water_bucket 1')
-    await op.until(() => op.window?.slots.some(s => s?.name === 'water_bucket') === true, 10000, 'bucket')
-    op.send({ t: 'hotbar', slot: op.window!.slots.findIndex(s => s?.name === 'water_bucket') - 36 })
+    await op.hold('water_bucket', 1)
     op.send({ t: 'look', yaw: 0, pitch: -Math.PI / 2 + 0.01 })
     await sleep(300)
     const key = `${px},${py + 1},${pz}`
@@ -455,6 +443,47 @@ describe('connection failures', () => {
     const dc = c.waitFor('disconnect')
     c.connect(port, { version: '1.7.10' })
     expect((await dc).reason).toMatch(/not supported/i)
+  })
+})
+
+describe('cancelled and replaced connection attempts', () => {
+  it('a cancelled attempt never comes back, even when another one starts right behind it', async () => {
+    const c = new TestClient('VassagoRace')
+    autoDeclinePack(c)
+    c.connect(port) // attempt 1 is still asking the server for its version…
+    c.close() // …when the player cancels
+    await sleep(1500)
+    expect(c.events.some(e => e.t === 'login')).toBe(false)
+    expect(c.events.filter(e => e.t === 'disconnect').length).toBe(1)
+
+    c.events.length = 0
+    c.connect(port) // attempt 2, cancelled and replaced at once by attempt 3
+    c.close()
+    const playing = c.waitFor('phase', e => e.phase === 'playing', 60000)
+    c.connect(port)
+    await playing
+    await sleep(1500)
+    expect(c.events.filter(e => e.t === 'login').length).toBe(1)
+    // only the cancel of attempt 2 shows up; nothing ended attempt 3
+    expect(c.events.filter(e => e.t === 'disconnect').length).toBe(1)
+    const dc = c.waitFor('disconnect')
+    c.close()
+    await dc
+  })
+
+  it('a failing attempt that was already replaced does not end its replacement', async () => {
+    const c = new TestClient('VassagoRace')
+    autoDeclinePack(c)
+    const playing = c.waitFor('phase', e => e.phase === 'playing', 60000)
+    c.connect(1) // will be refused…
+    c.connect(port) // …but the player has already moved on
+    await playing
+    await sleep(1000)
+    expect(c.events.some(e => e.t === 'disconnect')).toBe(false)
+    expect(c.events.filter(e => e.t === 'login').length).toBe(1)
+    const dc = c.waitFor('disconnect')
+    c.close()
+    await dc
   })
 })
 

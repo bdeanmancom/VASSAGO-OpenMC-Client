@@ -54,6 +54,14 @@ describe('classifyError — Microsoft sign-in', () => {
   })
 })
 
+describe('version mismatch', () => {
+  it('explains a connection made with the wrong fixed version', () => {
+    const c = classifyError(new Error('This server is version 1.21.11, you are using version 1.21.4, please specify the correct version in the options.'))
+    expect(c.kind).toBe('version')
+    expect(c.reason).toBe('Version mismatch — the server runs 1.21.11, but this connection was made as 1.21.4.')
+  })
+})
+
 describe('classifyKick', () => {
   it('reads translation keys from JSON, objects and NBT-style components', () => {
     expect(translationKey('{"translate":"multiplayer.disconnect.unverified_username"}')).toBe('multiplayer.disconnect.unverified_username')
@@ -80,6 +88,43 @@ describe('classifyKick', () => {
     const plain = classifyKick('x', 'integration test kick')
     expect(plain).toEqual({ kind: 'kicked', reason: 'integration test kick', detail: 'integration test kick' })
     expect(classifyKick(null, '').reason).toBe('Kicked by server')
+  })
+})
+
+describe('classifyKick with connection context', () => {
+  const offline = (askedToVerify: boolean, loggedIn = false) => ({ auth: 'offline' as const, askedToVerify, loggedIn })
+  const microsoft = { auth: 'microsoft' as const, askedToVerify: false, loggedIn: false }
+
+  it('decides "needs a verified account" from the handshake, whatever the wording or language', () => {
+    // a proxy set to German, a plugin with its own text, the auth-servers-down message, no text at all
+    for (const text of ['Du bist nicht in deinem Minecraft-Konto angemeldet.', 'Premium only!', 'Authentication servers are down. Please try again later. Sorry!', '']) {
+      const c = classifyKick({ text }, text, offline(true))
+      expect(c.kind).toBe('auth-required')
+      expect(c.reason).toMatch(/online mode/)
+    }
+    expect(classifyKick({ text: 'Premium only!' }, 'Premium only!', offline(true)).detail).toBe('Premium only!')
+  })
+  it('does not blame accounts when the server never asked to verify one', () => {
+    const c = classifyKick({ translate: 'multiplayer.disconnect.unverified_username' }, 'Failed to verify username!', offline(false))
+    expect(c.kind).toBe('kicked')
+    expect(c.reason).toMatch(/did not ask for account verification/)
+    expect(c.reason).toContain('Failed to verify username!')
+    expect(c.reason).not.toMatch(/Microsoft/)
+  })
+  it('keeps specific refusals as they are', () => {
+    expect(classifyKick({ translate: 'multiplayer.disconnect.not_whitelisted' }, 'You are not white-listed on this server!', offline(true)).kind).toBe('whitelist')
+    expect(classifyKick({ translate: 'multiplayer.disconnect.server_full' }, 'The server is full!', offline(true)).kind).toBe('full')
+    expect(classifyKick({ translate: 'multiplayer.disconnect.ip_banned' }, 'You have been IP banned from this server', offline(false)).kind).toBe('banned')
+  })
+  it('leaves kicks in the world alone', () => {
+    const c = classifyKick({ text: 'Invalid move player packet received' }, 'Invalid move player packet received', offline(true, true))
+    expect(c).toEqual({ kind: 'kicked', reason: 'Invalid move player packet received', detail: 'Invalid move player packet received' })
+  })
+  it('tells a Microsoft profile that its session was not verified, not that it needs an account', () => {
+    const c = classifyKick({ translate: 'multiplayer.disconnect.unverified_username' }, 'Failed to verify username!', microsoft)
+    expect(c.kind).toBe('kicked')
+    expect(c.reason).toMatch(/could not verify this Microsoft session/)
+    expect(classifyKick({ text: 'x' }, 'Authentication servers are down. Please try again later. Sorry!', microsoft).reason).toMatch(/Authentication servers are down/)
   })
 })
 

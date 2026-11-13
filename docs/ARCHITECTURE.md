@@ -62,6 +62,43 @@ core) without touching the other.
   interpolated by the renderer; camera rotation is applied locally every frame so looking around has no
   latency.
 
+## Protocol behaviours the client adds on top of the library
+
+The protocol library is treated as a dependency, never edited in `node_modules`. Where its
+behaviour differs from what servers expect, the difference is corrected in `src/session`:
+
+* **Client tick end** (`src/session/tick-end.ts`). The official client ends every game tick with a
+  tick-end packet (1.21.2+). mineflayer 4.39 never sends it. Servers up to 26.2 do not mind; 26.3
+  disconnects a client that sends a second position packet before a tick end
+  (`ServerGamePacketListenerImpl.receivedPositionThisTick`, cleared only by `handleClientTickEnd`)
+  with `multiplayer.disconnect.invalid_player_movement`. The module sends tick-end once per client
+  tick and guarantees a tick end between any two position packets, including during catch-up
+  bursts and teleport answers, and steps aside if a future library version sends it itself.
+* **Connection attempts** (`Attempt` in `src/session/session.ts`). Each `connect()` gets a token
+  that `teardown()` marks abandoned. Every `await` and every callback handed to the libraries checks
+  it, because the libraries keep working after a cancel: a status ping, a DNS lookup or a Microsoft
+  device-code sign-in may complete minutes later. A torn-down client is also *neutralised* — it
+  destroys any socket it is handed and its connect hook is replaced — so a sign-in finished in the
+  browser after the user cancelled can neither log in out of sight nor store tokens.
+* **Why a server refused a private-server name** is read from the handshake: an encryption request
+  in answer to an unverified login means the server (or proxy) wants a verified account, whatever
+  the kick text says. Without that request, an "unverified username" message is treated as the
+  server-side failure it is.
+* **Resource packs** are answered only after the user consents (the library's auto-accept plugin is
+  disabled).
+* **Crafting on pre-1.21.5 servers**: consumed ingredients are predicted locally, as the official
+  client does.
+* **Sky light** missing from edge chunks is repaired on the client (`src/renderer/game/skylight.ts`).
+
+## Servers that translate for older clients (ViaVersion / ViaBackwards)
+
+ViaVersion answers a status ping with the pinging client's own protocol number, so a 26.3 server
+(protocol 777) looks like protocol 775 to a client that pings as 26.1. The client then connects as
+26.1 and ViaBackwards translates. `pingServer` notices that the server names a different game
+version than the one it will speak and reports it as `serverVersion`; the UI shows
+"26.3 · joins as 26.1". A 26.3 server **without** ViaBackwards cannot be joined yet: the
+PrismarineJS stack has no protocol data for 777.
+
 ## Version adapter layer
 
 `src/session/versions.ts` decides which game version to speak (status ping → protocol number → newest
@@ -71,7 +108,9 @@ matching release) and whether it is *verified*. Everything version-specific live
 * block states / collision shapes / item + entity names: `resources/gamedata/<version>.json`, generated
   by `scripts/gen-blockdata.mjs` for every version the protocol stack supports
 * `VERIFIED_VERSIONS` in `src/shared/protocol.ts` lists only versions that pass the integration suite.
-  The UI labels everything else *experimental* and refuses protocols it has no data for with a clear message.
+  `VERIFIED_TRANSLATED` lists server versions verified through the server's own translation layer,
+  as exact pairs (`26.3` joined as `26.1`). The UI labels everything else *experimental* and refuses
+  protocols it has no data for with a clear message.
 
 To add a version: bump the PrismarineJS packages, run `npm run gen:data`, run
 `VASSAGO_TEST_VERSION=<v> npm run test:integration`, and only then add it to `VERIFIED_VERSIONS`.
@@ -90,6 +129,7 @@ palettes and patterns; `itemicons.ts` paints item icons. Entities use simple ori
 * Microsoft sign-in uses the OAuth device-code flow (prismarine-auth); passwords never touch the app.
   Tokens are encrypted with the OS keychain via Electron `safeStorage`; without OS encryption they
   are kept in memory only.
-* Offline ("private server") mode never attempts to answer an online-mode encryption request without a
-  real session; the server rejects the login and the client reports why.
+* A private-server (offline) profile holds no account session, so it cannot pass an online-mode
+  server's verification: the key exchange completes, the server's session check fails, the server
+  rejects the login and the client reports why. Nothing is done to fake or skip that check.
 * No telemetry, analytics, auto-update pings or background services.

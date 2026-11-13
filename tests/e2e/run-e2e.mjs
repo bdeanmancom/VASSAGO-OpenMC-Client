@@ -4,6 +4,10 @@
 //   xvfb-run -a node tests/e2e/run-e2e.mjs            (Linux/CI; starts its own server, needs MC_EULA=true)
 //   VASSAGO_TEST_PORT=25570 node tests/e2e/run-e2e.mjs (reuse a running `npm run test-server`)
 //
+// Server profile (same variables as the integration suite):
+//   VASSAGO_TEST_VERSION=26.3 VASSAGO_TEST_VIA=1 VASSAGO_TEST_CLIENT_VERSION=26.1   Paper 26.3 + ViaVersion/ViaBackwards
+//   VASSAGO_TEST_ONLINE_PORT=<port>   reuse an online-mode server for the "requires an account" screen
+//
 // Screenshots are written to tests/e2e/artifacts/.
 import { _electron as electron } from 'playwright'
 import fs from 'node:fs'
@@ -45,12 +49,23 @@ async function until (fn, timeout = 15000, what = 'condition') {
   }
 }
 
+const SERVER_VERSION = process.env.VASSAGO_TEST_VERSION ?? '1.21.11'
+// What the client is expected to speak; differs from the server version behind ViaBackwards.
+const CLIENT_VERSION = process.env.VASSAGO_TEST_CLIENT_VERSION ?? SERVER_VERSION
+const profile = { version: SERVER_VERSION, build: process.env.VASSAGO_TEST_BUILD ?? 'latest', via: process.env.VASSAGO_TEST_VIA === '1' }
 let server = null
+let onlineServer = null
 let port = Number(process.env.VASSAGO_TEST_PORT ?? 0)
+let onlinePort = Number(process.env.VASSAGO_TEST_ONLINE_PORT ?? 0)
 if (!port) {
   port = 25590
   console.log('starting Paper test server…')
-  server = await startServer({ ...parseArgs([]), port, resourcePack: 'http://127.0.0.1:9/vassago-test-pack.zip', acceptEula: process.env.MC_EULA === 'true' }, { quiet: true })
+  server = await startServer({ ...parseArgs([]), ...profile, port, resourcePack: 'http://127.0.0.1:9/vassago-test-pack.zip', acceptEula: process.env.MC_EULA === 'true' }, { quiet: true })
+}
+if (!onlinePort) {
+  onlinePort = 25591
+  console.log('starting online-mode Paper test server…')
+  onlineServer = await startServer({ ...parseArgs([]), ...profile, port: onlinePort, online: true, levelType: 'minecraft:flat', acceptEula: process.env.MC_EULA === 'true' }, { quiet: true })
 }
 
 // VASSAGO_APP_PATH=<packaged executable> tests an installed/unpacked build instead of the dev tree.
@@ -114,9 +129,16 @@ try {
     await page.click('[data-testid="add-offline"]')
     await page.fill('[data-testid="profile-username"]', 'no')
     if (!(await page.isDisabled('[data-testid="save-profile"]'))) throw new Error('invalid username was accepted')
+    await page.fill('[data-testid="profile-username"]', 'VassagoOpp')
+    await page.click('[data-testid="save-profile"]')
+    await page.waitForSelector('.profile-card.active >> text=VassagoOpp')
+    // a name can be corrected afterwards (a whitelist needs it to match exactly)
+    await page.click('.profile-card.active [data-testid="rename-profile"]')
+    await page.fill('[data-testid="profile-username"]', 'Player')
+    if (!(await page.isDisabled('[data-testid="save-profile"]'))) throw new Error('a duplicate profile name was accepted')
     await page.fill('[data-testid="profile-username"]', 'VassagoOp')
     await page.click('[data-testid="save-profile"]')
-    await page.waitForSelector('.profile-card.active >> text=VassagoOp')
+    await page.waitForSelector('.profile-card.active >> text=/^VassagoOp$/')
     await sleep(250)
     await shot('04-profiles.png')
   })
@@ -130,7 +152,8 @@ try {
     await page.click('[data-testid="save-server"]')
     await page.waitForSelector('[data-testid="server-card"] .badge.ok', { timeout: 15000 })
     const text = await page.textContent('[data-testid="server-card"]')
-    if (!/1\.21\.11/.test(text) || !/verified/.test(text)) throw new Error(`status not shown: ${text}`)
+    if (!text.includes(CLIENT_VERSION) || !/verified/.test(text)) throw new Error(`status not shown: ${text}`)
+    if (SERVER_VERSION !== CLIENT_VERSION && !text.includes(`${SERVER_VERSION} · joins as ${CLIENT_VERSION}`)) throw new Error(`translated server not labelled: ${text}`)
     await sleep(300)
     await shot('05-servers.png')
     return text.replace(/\s+/g, ' ').slice(0, 90)
@@ -152,6 +175,25 @@ try {
     await page.click('[data-testid="back-to-menu"]')
     await page.waitForSelector('.brand-name')
     return reason
+  })
+
+  await step('online-mode server: explains the refusal and offers both ways forward', async () => {
+    await page.click('[data-nav="direct"]')
+    await page.fill('[data-testid="direct-address"]', `127.0.0.1:${onlinePort}`)
+    await page.click('[data-testid="direct-connect"]')
+    await page.waitForSelector('[data-testid="loading-identity"]', { timeout: 15000 }).catch(() => {})
+    await page.waitForSelector('[data-testid="disconnected"][data-kind="auth-required"]', { timeout: 40000 })
+    const text = await page.textContent('[data-testid="disconnected"]')
+    for (const expected of ['verified account', 'online mode', 'online-mode=false', 'IP allow-list', 'private-server name “VassagoOp”']) {
+      if (!text.includes(expected)) throw new Error(`screen does not mention “${expected}”: ${text.replace(/\s+/g, ' ').slice(0, 300)}`)
+    }
+    if (await page.locator('[data-testid="msa-code"]').count() !== 0) throw new Error('a private-server profile must never trigger Microsoft sign-in')
+    await page.waitForSelector('[data-testid="retry-microsoft"]')
+    await page.waitForSelector('[data-testid="owner-steps"]')
+    await sleep(250)
+    await shot('07b-server-requires-account.png')
+    await page.click('[data-testid="back-to-menu"]')
+    await page.waitForSelector('.brand-name')
   })
 
   console.log('in game')
@@ -230,7 +272,9 @@ try {
   })
 
   await step('a second player joins and is visible', async () => {
-    bot = mineflayer.createBot({ host: '127.0.0.1', port, username: 'VassagoBob', auth: 'offline', version: '1.21.11', hideErrors: true, plugins: { resource_pack: false } })
+    bot = mineflayer.createBot({ host: '127.0.0.1', port, username: 'VassagoBob', auth: 'offline', version: CLIENT_VERSION, hideErrors: true, plugins: { resource_pack: false } })
+    // This helper bot is plain mineflayer, which does not end its client ticks; 26.3 servers kick for that.
+    bot.once('inject_allowed', () => { if (bot.registry.protocol.play.toServer.types.packet_tick_end) bot.on('physicsTick', () => { if (bot._client.state === 'play') bot._client.write('tick_end', {}) }) })
     bot.on('error', () => {})
     bot._client.on('add_resource_pack', p => bot._client.write('resource_pack_receive', { uuid: p.uuid, result: 1 }))
     await new Promise((resolve, reject) => { bot.once('spawn', resolve); bot.once('kicked', r => reject(new Error(String(r)))); setTimeout(() => reject(new Error('bot spawn timeout')), 60000) })
@@ -373,6 +417,8 @@ try {
     await page.waitForSelector('.brand-name')
     await page.click('[data-nav="play"]')
     await page.waitForSelector('.recent-card >> text=Local Paper')
+    const identity = await page.textContent('[data-testid="play-identity"]')
+    if (!identity.includes('VassagoOp') || !identity.includes('private-server profile')) throw new Error(`the Play page does not say who it joins as: ${identity}`)
     await sleep(500)
     await shot('20-play-recent.png')
   })
@@ -417,6 +463,7 @@ try {
   try { bot?.quit() } catch {}
   await app.close().catch(() => {})
   if (server) await server.stop()
+  if (onlineServer) await onlineServer.stop()
   fs.writeFileSync(path.join(artifacts, 'results.json'), JSON.stringify({ at: new Date().toISOString(), results }, null, 2))
   try { fs.rmSync(userData, { recursive: true, force: true }) } catch {}
 }

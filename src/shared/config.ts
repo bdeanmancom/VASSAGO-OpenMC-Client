@@ -20,7 +20,18 @@ export interface SavedServer {
   requiresAccount?: boolean
 }
 
-export interface RecentConnection { host: string, port: number, name: string, at: number, profileId: string, version?: string }
+export interface RecentConnection {
+  host: string
+  port: number
+  name: string
+  at: number
+  /**
+   * Set only when the last successful join used a profile other than the default one (picked in
+   * Direct Connect or from a disconnect screen). Otherwise the server follows the default profile.
+   */
+  pinnedProfileId?: string
+  version?: string
+}
 
 export type GraphicsPreset = 'low' | 'medium' | 'high' | 'ultra' | 'custom'
 

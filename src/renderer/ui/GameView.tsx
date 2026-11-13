@@ -90,7 +90,7 @@ export function GameView ({ opts, target, settings, setSettings, onJoined, onExi
         </div>
       )}
       {!inWorld && !disconnect && <LoadingScreen store={store} target={target} opts={opts} onCancel={onExit} />}
-      {msa && !disconnect && (
+      {msa && opts.auth === 'microsoft' && !disconnect && (
         <Modal
           title="Sign in with Microsoft"
           actions={<>

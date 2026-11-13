@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { defaultConfig, isValidUsername, parseAddress, sanitizeConfig } from '../../src/shared/config'
 import { describeDisconnect } from '../../src/session/errors'
 import { titleText } from '../../src/session/session'
+import { translatedServerVersion, versionForProtocol } from '../../src/session/versions'
+import { VERIFIED_TRANSLATED, VERIFIED_VERSIONS, isVerified } from '../../src/shared/protocol'
 
 describe('parseAddress', () => {
   it('parses hosts with and without ports', () => {
@@ -65,5 +67,37 @@ describe('titleText', () => {
     expect(titleText({ type: 'compound', value: { text: { type: 'string', value: 'hi' } } })).toBe('hi')
     expect(titleText({ translate: 'multiplayer.disconnect.not_whitelisted' })).toMatch(/white-listed/)
     expect(titleText({ translate: 'some.unknown.key', with: ['x'] })).toBe('some.unknown.key x')
+  })
+})
+
+describe('server version detection', () => {
+  it('maps protocol numbers to the release this client speaks', () => {
+    expect(versionForProtocol(774)).toBe('1.21.11')
+    expect(versionForProtocol(775)).toBe('26.1')
+    expect(versionForProtocol(777)).toBeNull() // 26.3 itself is not spoken natively
+  })
+  it('notices a server that translates for older clients', () => {
+    // Paper 26.3 with ViaVersion echoes the pinging client's protocol (775) but names its own version
+    expect(translatedServerVersion('Paper 26.3', '26.1', 775)).toBe('26.3')
+    expect(translatedServerVersion('§aPaper 26.3', '1.21.11', 774)).toBe('26.3')
+  })
+  it('stays quiet for native servers, same-protocol releases and version ranges', () => {
+    expect(translatedServerVersion('Paper 1.21.11', '1.21.11', 774)).toBeUndefined()
+    expect(translatedServerVersion('Paper 26.1.2', '26.1', 775)).toBeUndefined()
+    expect(translatedServerVersion('Velocity 1.7.2-1.21.11', '1.21.11', 774)).toBeUndefined()
+    expect(translatedServerVersion('A Minecraft Server', '1.21.11', 774)).toBeUndefined()
+    expect(translatedServerVersion(undefined, '1.21.11', 774)).toBeUndefined()
+    expect(translatedServerVersion('Paper 26.3', null, 777)).toBeUndefined()
+  })
+  it('only calls a combination verified when that exact combination passed the suite', () => {
+    expect(isVerified('1.21.11')).toBe(true)
+    expect(isVerified('1.21.4')).toBe(true)
+    expect(isVerified('1.20.4')).toBe(false)
+    expect(isVerified(null)).toBe(false)
+    // a 26.3 server that translates for a 26.1 client was tested; other translated pairs were not
+    expect(isVerified('26.1', '26.3')).toBe(true)
+    expect(isVerified('26.1', '26.2')).toBe(false)
+    expect(isVerified('1.21.11', '26.3')).toBe(false)
+    expect(VERIFIED_TRANSLATED.every(t => !VERIFIED_VERSIONS.includes(t.server))).toBe(true)
   })
 })

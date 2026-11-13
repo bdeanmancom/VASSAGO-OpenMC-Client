@@ -14,8 +14,9 @@ Vassago's own procedural art engine.
   offline mode. No Microsoft sign-in involved.
 * **Official Account Mode** — Microsoft device-code sign-in for online-mode servers. Ownership is
   checked by Microsoft/Mojang; Vassago never sees your password and never bypasses server authentication.
-* Installers are built for Windows, macOS (Apple Silicon + Intel) and Linux; so far only the Linux
-  build has actually been run. MIT licensed. No telemetry, no ads, no fees.
+* Installers for Windows, macOS (Apple Silicon + Intel) and Linux are attached to the
+  [GitHub Releases](../../releases) of this repository. They are unsigned, and so far only the Linux
+  build has actually been launched and tested. MIT licensed. No telemetry, no ads, no fees.
 
 | | |
 |---|---|
@@ -24,6 +25,17 @@ Vassago's own procedural art engine.
 | ![Inventory and crafting](docs/screenshots/inventory.jpg) | ![Survival HUD](docs/screenshots/survival-hud.jpg) |
 
 _Screenshots are captured by the automated end-to-end test (software rendering, PaperMC 1.21.11)._
+
+## Which servers it can join
+
+| Server | How | Status |
+|---|---|---|
+| 1.21.4, 1.21.11 | spoken natively | verified by the automated suites |
+| 26.3 with ViaVersion + ViaBackwards installed | Vassago joins as 26.1, the server translates | verified by the automated suites |
+| 26.2 / 26.3 without ViaBackwards | — | not supported yet (the protocol library has no 26.2/26.3 data) |
+| other versions from 1.20.2 to 26.1 | spoken natively | experimental — see [DEVELOPMENT_STATUS.md](DEVELOPMENT_STATUS.md) |
+
+The server list shows this per server, for example “26.3 · joins as 26.1 · verified”.
 
 See [DEVELOPMENT_STATUS.md](DEVELOPMENT_STATUS.md) for exactly what is verified, what is partial and
 what is missing — nothing is claimed that has not been tested.
@@ -62,10 +74,33 @@ npm run test-server -- --accept-eula
 
 This downloads PaperMC and starts an offline-mode server bound to `127.0.0.1:25570` (Java 21 required;
 `--accept-eula` confirms you agree to the [Minecraft EULA](https://aka.ms/MinecraftEULA)). Then in
-Vassago: **Direct Connect → `127.0.0.1:25570`**.
+Vassago: **Direct Connect → `127.0.0.1:25570`**. For a current server that admits older clients,
+add `--version 26.3 --via` (Paper 26.x needs Java 25; the harness fetches a JDK for itself if yours
+is older).
 
 Installers: `npm run dist:linux`, `npm run dist:win`, `npm run dist:mac` — see
 [docs/PACKAGING.md](docs/PACKAGING.md) for prerequisites and code-signing.
+
+## Trouble connecting?
+
+```bash
+npm run check-server -- play.example.net
+```
+
+reports, from your own computer, whether the server is reachable, which version it runs and whether
+it accepts private-server (offline-mode) names or asks for a verified account. It only starts a
+login far enough to see how the server answers and never joins.
+
+* **“This server asks for a verified account”** — the server (or its proxy) is in online mode. That
+  is the server's rule; Vassago does not get around it. Sign in with a Microsoft account that owns
+  the game, or — on a server you run — turn online mode off (the screen lists the steps).
+* **“Not on the whitelist”** — on an offline-mode server the whitelist is matched on the exact
+  name. Rename your profile under **Profiles** (pencil button) or ask the owner to add the name.
+* **“Invalid move player packet received” about a second after joining a 26.3 server** — fixed in
+  0.2.0. Update; if it still happens, export diagnostics from Settings and open an issue.
+* A Microsoft sign-in window appears although you wanted a private-server name — the connection
+  was started with a Microsoft-account profile. The Play page says who it joins as; change the
+  default under **Profiles**.
 
 ## Controls
 
@@ -102,8 +137,9 @@ Offline-mode servers accept any username from anyone who can reach them. If you 
 
 ```bash
 npm run typecheck         # TypeScript
-npm test                  # unit tests (mesher, registry, raycast, art, config)
+npm test                  # unit tests (mesher, registry, raycast, art, config, errors, tick ends)
 MC_EULA=true npm run test:integration   # real Paper servers: offline + online mode
+MC_EULA=true npm run test:soak          # two players, minutes long; fails on any disconnect
 xvfb-run -a npm run test:e2e            # Electron end-to-end against a real server (Linux)
 ```
 
