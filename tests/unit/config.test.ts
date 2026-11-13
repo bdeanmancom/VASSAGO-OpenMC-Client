@@ -92,6 +92,7 @@ describe('server version detection', () => {
   it('only calls a combination verified when that exact combination passed the suite', () => {
     expect(isVerified('1.21.11')).toBe(true)
     expect(isVerified('1.21.4')).toBe(true)
+    expect(isVerified('26.1')).toBe(true) // a native 26.1.x server
     expect(isVerified('1.20.4')).toBe(false)
     expect(isVerified(null)).toBe(false)
     // a 26.3 server that translates for a 26.1 client was tested; other translated pairs were not

@@ -23,6 +23,8 @@ jobs:
         include:
           # A server the client speaks to natively.
           - { id: paper-1.21.11, name: 'Paper 1.21.11', version: '1.21.11', client: '1.21.11', via: '0', java: '21', soak: '0', force: '', e2e: '1' }
+          # The newest version the client speaks itself. Headless suite only.
+          - { id: paper-26.1.2, name: 'Paper 26.1.2', version: '26.1.2', client: '26.1', via: '0', java: '25', soak: '0', force: '', e2e: '0' }
           # A current server that admits older clients through ViaVersion/ViaBackwards:
           # the client speaks 26.1, the server runs 26.3 (which enforces client tick ends).
           - { id: paper-26.3-via, name: 'Paper 26.3 + ViaBackwards', version: '26.3', client: '26.1', via: '1', java: '25', soak: '2', force: '', e2e: '1' }

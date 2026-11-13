@@ -146,7 +146,7 @@ export const FACE_VECTORS: readonly (readonly [number, number, number])[] = [
 ]
 
 /** Versions the client speaks that have passed the integration suite against a real server of that version. */
-export const VERIFIED_VERSIONS: readonly string[] = ['1.21.4', '1.21.11']
+export const VERIFIED_VERSIONS: readonly string[] = ['1.21.4', '1.21.11', '26.1']
 
 /**
  * Newer server versions the client cannot speak itself, but which have passed the integration

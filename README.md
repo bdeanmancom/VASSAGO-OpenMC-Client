@@ -30,7 +30,7 @@ _Screenshots are captured by the automated end-to-end test (software rendering, 
 
 | Server | How | Status |
 |---|---|---|
-| 1.21.4, 1.21.11 | spoken natively | verified by the automated suites |
+| 1.21.4, 1.21.11, 26.1.x | spoken natively | verified by the automated suites |
 | 26.3 with ViaVersion + ViaBackwards installed | Vassago joins as 26.1, the server translates | verified by the automated suites |
 | 26.2 / 26.3 without ViaBackwards | — | not supported yet (the protocol library has no 26.2/26.3 data) |
 | other versions from 1.20.2 to 26.1 | spoken natively | experimental — see [DEVELOPMENT_STATUS.md](DEVELOPMENT_STATUS.md) |
