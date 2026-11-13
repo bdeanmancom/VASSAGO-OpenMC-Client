@@ -135,6 +135,19 @@ export function App () {
   }, [config, activeProfile, start, toast])
 
   /**
+   * Close the current game screen. A Microsoft profile that was created for this connection only
+   * and never got into a server is not kept (see retryAs) — so its sign-in is not kept either,
+   * otherwise the next "Sign in with Microsoft" would silently reuse it.
+   */
+  const leave = useCallback((next?: Profile) => {
+    const p = game?.profile
+    setGame(null)
+    if (!p || p.auth !== 'microsoft' || next?.id === p.id || config?.profiles.some(x => x.id === p.id)) return
+    // after the screen has closed its connection, so a sign-in finishing right now cannot store anything
+    setTimeout(() => { void window.vassago.app.signOut(p.username) }, 1000)
+  }, [game, config])
+
+  /**
    * From a disconnect screen: connect to the same server again as a different kind of profile.
    * This is a choice for this connection only — it never changes which profile is the default,
    * and a profile created here is only kept once it has actually got into a server.
@@ -148,13 +161,13 @@ export function App () {
         ? { id: newId(), name: 'Player', username: 'Player', auth: 'offline' }
         : { id: newId(), name: 'Microsoft account', username: 'Microsoft account', auth: 'microsoft' })
     const go = () => {
-      setGame(null)
+      leave(chosen)
       if (chosen.auth === 'offline' && !config.settings.acceptedOfflineWarning) setPendingOffline({ target, profile: chosen })
       else start(target, chosen)
     }
     if (fresh && mode === 'microsoft') void window.vassago.app.signOut(chosen.username).then(go, go)
     else go()
-  }, [config, game, activeProfile, start])
+  }, [config, game, activeProfile, start, leave])
 
   /** Remember whether a server turned away unverified names, so the launcher can say so up front. */
   const recordOutcome = useCallback((target: Target, kind: DisconnectKind | undefined) => {
@@ -178,7 +191,7 @@ export function App () {
             settings={config.settings}
             setSettings={setSettings}
             onJoined={() => recordJoin(game.target, game.profile)}
-            onExit={() => setGame(null)}
+            onExit={() => leave()}
             onReconnect={() => setGame(g => g ? { ...g, key: Date.now() } : g)}
             onRetryAs={retryAs}
             onOutcome={kind => recordOutcome(game.target, kind)}

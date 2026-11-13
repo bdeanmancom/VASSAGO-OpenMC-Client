@@ -60,12 +60,12 @@ let onlinePort = Number(process.env.VASSAGO_TEST_ONLINE_PORT ?? 0)
 if (!port) {
   port = 25590
   console.log('starting Paper test server…')
-  server = await startServer({ ...parseArgs([]), ...profile, port, resourcePack: 'http://127.0.0.1:9/vassago-test-pack.zip', acceptEula: process.env.MC_EULA === 'true' }, { quiet: true })
+  server = await startServer({ ...parseArgs([]), difficulty: 'peaceful', ...profile, port, resourcePack: 'http://127.0.0.1:9/vassago-test-pack.zip', acceptEula: process.env.MC_EULA === 'true' }, { quiet: true })
 }
 if (!onlinePort) {
   onlinePort = 25591
   console.log('starting online-mode Paper test server…')
-  onlineServer = await startServer({ ...parseArgs([]), ...profile, port: onlinePort, online: true, levelType: 'minecraft:flat', acceptEula: process.env.MC_EULA === 'true' }, { quiet: true })
+  onlineServer = await startServer({ ...parseArgs([]), difficulty: 'peaceful', ...profile, port: onlinePort, online: true, levelType: 'minecraft:flat', acceptEula: process.env.MC_EULA === 'true' }, { quiet: true })
 }
 
 // VASSAGO_APP_PATH=<packaged executable> tests an installed/unpacked build instead of the dev tree.
@@ -210,6 +210,7 @@ try {
   await step('renders the world (chunks meshed and drawn)', async () => {
     // start from the surface in daylight, wherever the player last logged out
     const p0 = (await until(async () => { const st = await state(); return st?.pos && st.pos.y !== 0 ? st : null }, 30000, 'position')).pos
+    await say('/difficulty peaceful') // no mobs wandering into the test (matters on a reused server)
     await say('/gamemode survival')
     await say('/time set 1000')
     await say('/weather clear')

@@ -6,7 +6,7 @@
 //   node scripts/test-server.mjs --version 26.3 --build 244 --via   (Paper 26.3 + ViaVersion/ViaBackwards)
 //
 // Options: --version <v>  --build <n|latest>  --port <n>  --online  --flat  --seed <s>  --gamemode <m>
-//          --resource-pack <url>  --via (latest ViaVersion + ViaBackwards CI builds)  --plugin <jar path or https url> (repeatable)
+//          --resource-pack <url>  --via (latest ViaVersion + ViaBackwards CI builds)  --plugin <jar path or https url> (repeatable)  --difficulty <peaceful|easy|normal|hard>
 //          --java <path to a java binary> (or VASSAGO_JAVA). Paper 26.x needs Java 25: when the Java on PATH is
 //          older, a Temurin JDK 25 is downloaded once into .test-server/jdk/.
 //
@@ -25,7 +25,7 @@ import { fileURLToPath } from 'node:url'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 export function parseArgs (argv) {
-  const out = { version: '1.21.11', build: 'latest', port: 25570, online: false, acceptEula: process.env.MC_EULA === 'true', levelType: 'minecraft:normal', seed: 'vassago', gamemode: 'survival', plugins: [], via: false, java: process.env.VASSAGO_JAVA || null }
+  const out = { version: '1.21.11', build: 'latest', port: 25570, online: false, acceptEula: process.env.MC_EULA === 'true', levelType: 'minecraft:normal', seed: 'vassago', gamemode: 'survival', plugins: [], via: false, java: process.env.VASSAGO_JAVA || null, difficulty: 'easy' }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     if (a === '--version') out.version = argv[++i]
@@ -40,6 +40,7 @@ export function parseArgs (argv) {
     else if (a === '--via') out.via = true
     else if (a === '--plugin') out.plugins.push(argv[++i])
     else if (a === '--java') out.java = argv[++i]
+    else if (a === '--difficulty') out.difficulty = argv[++i]
   }
   return out
 }
@@ -162,7 +163,7 @@ export async function prepareServer (opts) {
     'level-type': opts.levelType,
     'level-seed': opts.seed,
     gamemode: opts.gamemode,
-    difficulty: 'easy',
+    difficulty: opts.difficulty ?? 'easy',
     'spawn-protection': '0',
     'view-distance': '8',
     'simulation-distance': '5',

@@ -2,6 +2,7 @@
  * Game: glue between the session (protocol/gameplay core), the client world,
  * the renderer, input and the HUD store.
  */
+import { createAttemptGate, newAttemptId } from '../../shared/attempt'
 import * as THREE from 'three'
 import type { ConnectOptions, Controls, SessionCommand, SessionEvent, WindowDTO } from '../../shared/protocol'
 import type { Settings } from '../../shared/config'
@@ -97,6 +98,10 @@ export class Game {
     private opts: ConnectOptions
   ) {}
 
+  /** Identifies this screen's connection attempt among the events of the shared session. */
+  private readonly attemptId = newAttemptId()
+  private readonly mine = createAttemptGate(this.attemptId)
+
   // ------------------------------------------------------------------ setup
 
   start () {
@@ -104,7 +109,7 @@ export class Game {
     this.store.set({ phase: 'connecting', phaseDetail: `${this.opts.host}:${this.opts.port}`, server: `${this.opts.host}${this.opts.port !== 25565 ? ':' + this.opts.port : ''}`, username: this.opts.username })
     this.audio.volume = this.settings.volume
     this.unsub = bridge.session.onEvent(ev => this.onEvent(ev))
-    this.send({ t: 'connect', opts: this.opts })
+    this.send({ t: 'connect', opts: this.opts, attempt: this.attemptId })
     this.bindInput()
     this.lastFrame = performance.now()
     const loop = () => {
@@ -457,6 +462,7 @@ export class Game {
 
   private onEvent (ev: SessionEvent) {
     if (this.disposed) return
+    if (!this.mine(ev)) return // left over from the connection the previous screen was showing
     const store = this.store
     switch (ev.t) {
       case 'phase':

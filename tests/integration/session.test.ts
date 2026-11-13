@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest'
 import { FORCED_VERSION, TestClient, sleep } from './harness'
 import { pingServer } from '../../src/session/versions'
+import { createAttemptGate } from '../../src/shared/attempt'
 
 const port = inject('port')
 const onlinePort = inject('onlinePort')
@@ -22,6 +23,7 @@ describe(`Paper ${version}${FORCED_VERSION ? ` (client forced to ${FORCED_VERSIO
   beforeAll(async () => {
     autoDeclinePack(op)
     await op.joined(port)
+    op.vanilla('difficulty peaceful') // no mobs wandering into the tests (matters on a reused server)
   })
   afterAll(async () => { op.close(); bob.close(); await sleep(300) })
 
@@ -481,6 +483,37 @@ describe('cancelled and replaced connection attempts', () => {
     await sleep(1000)
     expect(c.events.some(e => e.t === 'disconnect')).toBe(false)
     expect(c.events.filter(e => e.t === 'login').length).toBe(1)
+    const dc = c.waitFor('disconnect')
+    c.close()
+    await dc
+  })
+})
+
+describe('a game screen taking over the shared session', () => {
+  it('does not mistake the previous connection ending for its own', async () => {
+    // What the app does when the player switches profile from inside a live connection: the old
+    // screen closes its connection and the new one connects, back to back, on the same session.
+    const c = new TestClient('VassagoRace')
+    autoDeclinePack(c)
+    const first = c.waitFor('login', () => true, 60000)
+    c.connect(port, {}, 1)
+    await first
+    const second = c.waitFor('phase', e => e.phase === 'playing', 60000)
+    autoDeclinePack(c) // the server asks every connection about its resource pack
+    c.close()
+    c.connect(port, {}, 2)
+    await second
+    await sleep(500)
+    const from = c.events.findIndex(e => e.t === 'login') + 1
+    const stream = c.events.slice(from)
+    // the raw stream does contain the first connection's "Disconnected"…
+    expect(stream.some(e => e.t === 'disconnect')).toBe(true)
+    // …but a screen listening for attempt 2 never sees it, and does see its own login
+    const mine = createAttemptGate(2)
+    const visible = stream.filter(mine)
+    expect(visible.some(e => e.t === 'disconnect')).toBe(false)
+    expect(visible.filter(e => e.t === 'login').length).toBe(1)
+    expect(visible[0]).toMatchObject({ t: 'phase', attempt: 2 })
     const dc = c.waitFor('disconnect')
     c.close()
     await dc

@@ -137,6 +137,11 @@ function isIPv6 (s: string): boolean {
 }
 
 /** Merge a loaded (possibly old/partial/corrupt) config with defaults. */
+/** The profile to fall back to when the default one is gone: a private-server name if there is one. */
+export function fallbackProfile (profiles: Profile[]): Profile {
+  return profiles.find(p => p.auth === 'offline') ?? profiles[0]
+}
+
 export function sanitizeConfig (raw: unknown): AppConfig {
   const def = defaultConfig()
   if (!raw || typeof raw !== 'object') return def
@@ -164,9 +169,16 @@ export function sanitizeConfig (raw: unknown): AppConfig {
     profiles: profiles.length > 0 ? profiles : def.profiles,
     activeProfileId: typeof r.activeProfileId === 'string' ? r.activeProfileId : def.activeProfileId,
     servers,
-    recents: Array.isArray(r.recents) ? r.recents.filter(x => x && typeof x.host === 'string').slice(0, 8) : [],
+    recents: [],
     settings
   }
-  if (!out.profiles.some(p => p.id === out.activeProfileId)) out.activeProfileId = out.profiles[0].id
+  if (!out.profiles.some(p => p.id === out.activeProfileId)) out.activeProfileId = fallbackProfile(out.profiles).id
+  // 0.1.0 stored the profile of every join as `profileId`; that is now a pin, and only when it
+  // differs from the default.
+  out.recents = (Array.isArray(r.recents) ? r.recents : []).filter(x => x && typeof x.host === 'string' && Number.isInteger(x.port)).slice(0, 8).map(x => {
+    const { profileId, pinnedProfileId, ...rest } = x as RecentConnection & { profileId?: unknown }
+    const pin = typeof pinnedProfileId === 'string' ? pinnedProfileId : typeof profileId === 'string' ? profileId : undefined
+    return pin && pin !== out.activeProfileId && out.profiles.some(p => p.id === pin) ? { ...rest, pinnedProfileId: pin } : rest
+  })
   return out
 }

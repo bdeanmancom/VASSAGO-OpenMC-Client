@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { defaultConfig, isValidUsername, parseAddress, sanitizeConfig } from '../../src/shared/config'
+import { defaultConfig, fallbackProfile, isValidUsername, parseAddress, sanitizeConfig } from '../../src/shared/config'
 import { describeDisconnect } from '../../src/session/errors'
 import { titleText } from '../../src/session/session'
-import { translatedServerVersion, versionForProtocol } from '../../src/session/versions'
+import { negotiate, readStatusVersion, translatedServerVersion, versionForProtocol } from '../../src/session/versions'
 import { VERIFIED_TRANSLATED, VERIFIED_VERSIONS, isVerified } from '../../src/shared/protocol'
 
 describe('parseAddress', () => {
@@ -100,5 +100,60 @@ describe('server version detection', () => {
     expect(isVerified('26.1', '26.2')).toBe(false)
     expect(isVerified('1.21.11', '26.3')).toBe(false)
     expect(VERIFIED_TRANSLATED.every(t => !VERIFIED_VERSIONS.includes(t.server))).toBe(true)
+  })
+  it('only trusts a status name that states one plain version', () => {
+    expect(readStatusVersion('Paper 1.21.11', '1.21.11', 774)).toEqual({ confirmed: true })
+    expect(readStatusVersion('Paper 26.1.2', '26.1', 775)).toEqual({ confirmed: true }) // same protocol as 26.1
+    expect(readStatusVersion('Paper 26.3', '26.1', 775)).toEqual({ confirmed: false, serverVersion: '26.3' })
+    // proxies and renamed servers: nothing can be said, so nothing is claimed
+    for (const name of ['Velocity 1.7.2-26.1', 'BungeeCord 1.8.x-1.21.x', 'Paper 1.21.x', 'MyNetwork', 'MyNetwork 2.0', '']) {
+      expect(readStatusVersion(name, '26.1', 775)).toEqual({ confirmed: false })
+    }
+  })
+  it('negotiates the version to speak, and whether the result counts as verified', () => {
+    // native servers
+    expect(negotiate('Paper 1.21.11', 774)).toEqual({ resolved: '1.21.11', serverVersion: undefined, confirmed: true })
+    expect(negotiate('Paper 26.1.2', 775)).toEqual({ resolved: '26.1', serverVersion: undefined, confirmed: true })
+    // a newer server that translates for us (it echoes our own protocol number)
+    expect(negotiate('Paper 26.3', 775)).toEqual({ resolved: '26.1', serverVersion: '26.3', confirmed: false })
+    // an older server that translates, but whose own version we speak: use that, without the translation
+    expect(negotiate('Paper 1.21.11', 775)).toEqual({ resolved: '1.21.11', confirmed: true })
+    // a proxy echoing our protocol: joinable, never "verified"
+    expect(negotiate('Velocity 1.7.2-26.1', 775)).toEqual({ resolved: '26.1', serverVersion: undefined, confirmed: false })
+    // a protocol we have no data for
+    expect(negotiate('Paper 26.3', 777).resolved).toBeNull()
+  })
+})
+
+describe('profiles in the stored configuration', () => {
+  const base = () => {
+    const c = defaultConfig()
+    const player = c.profiles[0]
+    return { c, player }
+  }
+  it('falls back to a private-server name when the default profile is gone', () => {
+    const profiles = [{ id: 'm', name: 'me@example.com', username: 'me@example.com', auth: 'microsoft' as const }, { id: 'o', name: 'Steve', username: 'Steve', auth: 'offline' as const }]
+    expect(fallbackProfile(profiles).id).toBe('o')
+    expect(fallbackProfile([profiles[0]]).id).toBe('m')
+    const { c } = base()
+    expect(sanitizeConfig({ ...c, profiles, activeProfileId: 'gone' }).activeProfileId).toBe('o')
+  })
+  it('turns the per-join profile of 0.1.0 recents into a pin only when it is not the default', () => {
+    const { c, player } = base()
+    const other = { id: 'brian', name: 'Brian', username: 'Brian', auth: 'offline' as const }
+    const raw = {
+      ...c,
+      profiles: [player, other],
+      activeProfileId: player.id,
+      recents: [
+        { host: 'a.example', port: 25565, name: 'A', at: 1, profileId: other.id }, // joined as someone else
+        { host: 'b.example', port: 25565, name: 'B', at: 2, profileId: player.id }, // joined as the default
+        { host: 'c.example', port: 25565, name: 'C', at: 3, profileId: 'deleted-profile' },
+        { host: 'd.example', port: 25565, name: 'D', at: 4, pinnedProfileId: other.id }
+      ]
+    }
+    const out = sanitizeConfig(raw)
+    expect(out.recents.map(r => r.pinnedProfileId)).toEqual([other.id, undefined, undefined, other.id])
+    expect(out.recents.every(r => !('profileId' in r))).toBe(true)
   })
 })

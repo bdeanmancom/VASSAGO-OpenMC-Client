@@ -17,11 +17,11 @@ export default async function setup ({ provide }: GlobalSetupContext) {
   const boots: Promise<void>[] = []
   if (!port) {
     port = 25580
-    boots.push(startServer({ ...parseArgs([]), version, build, via, port, resourcePack: 'http://127.0.0.1:9/vassago-test-pack.zip', acceptEula: process.env.MC_EULA === 'true' }, { quiet: true }).then((s: any) => { started.push(s) }))
+    boots.push(startServer({ ...parseArgs([]), difficulty: 'peaceful', version, build, via, port, resourcePack: 'http://127.0.0.1:9/vassago-test-pack.zip', acceptEula: process.env.MC_EULA === 'true' }, { quiet: true }).then((s: any) => { started.push(s) }))
   }
   if (!onlinePort) {
     onlinePort = 25581
-    boots.push(startServer({ ...parseArgs([]), version, build, via, port: onlinePort, online: true, levelType: 'minecraft:flat', acceptEula: process.env.MC_EULA === 'true' }, { quiet: true }).then((s: any) => { started.push(s) }))
+    boots.push(startServer({ ...parseArgs([]), difficulty: 'peaceful', version, build, via, port: onlinePort, online: true, levelType: 'minecraft:flat', acceptEula: process.env.MC_EULA === 'true' }, { quiet: true }).then((s: any) => { started.push(s) }))
   }
   await Promise.all(boots)
   provide('port', port)

@@ -117,7 +117,7 @@ export class GameSession {
   }
 
   private dispatch (cmd: SessionCommand): void {
-    if (cmd.t === 'connect') { void this.connect(cmd.opts); return }
+    if (cmd.t === 'connect') { void this.connect(cmd.opts, cmd.attempt); return }
     if (cmd.t === 'disconnect') { this.disconnect('Disconnected'); return }
     const bot = this.bot
     if (!bot || this.ended) return
@@ -157,7 +157,7 @@ export class GameSession {
 
   // ---------------------------------------------------------------- connect
 
-  async connect (opts: ConnectOptions): Promise<void> {
+  async connect (opts: ConnectOptions, attemptId?: number): Promise<void> {
     this.teardown()
     // One token per call. A cancelled or replaced attempt is marked abandoned by teardown(); every
     // await and every late callback below checks it, so an old attempt can never come back to life.
@@ -170,7 +170,9 @@ export class GameSession {
     this.lastReason = null
     this.askedToVerify = false
     this.tick = 0
-    this.emit({ t: 'phase', phase: opts.auth === 'microsoft' ? 'authenticating' : 'connecting', detail: `${opts.host}:${opts.port}` })
+    // The first event of every attempt. A front-end that shares this session with an earlier screen
+    // uses the echoed id to tell where its own connection's events begin.
+    this.emit({ t: 'phase', phase: opts.auth === 'microsoft' ? 'authenticating' : 'connecting', detail: `${opts.host}:${opts.port}`, attempt: attemptId })
 
     let version: string
     try {
@@ -218,15 +220,28 @@ export class GameSession {
       return
     }
     this.bot = bot
-    this.connectTimer = setTimeout(() => {
-      if (attempt.abandoned) return
-      if (!this.loggedIn && opts.auth !== 'microsoft') {
-        this.lastReason = { kind: 'network', reason: 'Connection timed out — the server did not respond in time.', kicked: false }
-        try { bot.end('timeout') } catch {}
-        this.finish(this.lastReason, false)
-      }
-    }, CONNECT_TIMEOUT_MS)
+    // A Microsoft attempt may sit at the sign-in window for minutes; its watchdog starts with the socket.
+    if (opts.auth !== 'microsoft') this.armConnectTimer(attempt, bot)
     this.wire(bot)
+  }
+
+  /**
+   * Watchdog for the time between opening the connection and entering the world. It is re-armed
+   * whenever the login makes progress and never runs out while the player is being asked about a
+   * resource pack — that wait is ours, not the server's.
+   */
+  private armConnectTimer (attempt: Attempt, bot: any) {
+    if (this.connectTimer) clearTimeout(this.connectTimer)
+    this.connectTimer = null
+    if (attempt.abandoned || this.loggedIn) return
+    this.connectTimer = setTimeout(() => {
+      this.connectTimer = null
+      if (attempt.abandoned || this.loggedIn) return
+      if (this.pendingPacks.length > 0) { this.armConnectTimer(attempt, bot); return }
+      this.lastReason = { kind: 'network', reason: 'Connection timed out — the server did not respond in time.', kicked: false }
+      try { bot.end('timeout') } catch {}
+      this.finish(this.lastReason, false)
+    }, CONNECT_TIMEOUT_MS)
   }
 
   /** prismarine-auth cache backed by the host's encrypted store instead of plain files. */
@@ -263,8 +278,11 @@ export class GameSession {
       try { fn(...a) } catch (err: any) { this.log('warn', `event handler error: ${err?.stack ?? err}`) }
     }
 
-    client.on('connect', guard(() => this.emit({ t: 'phase', phase: 'login' })))
+    const attempt = this.attempt
+    const progress = () => { if (attempt) this.armConnectTimer(attempt, bot) }
+    client.on('connect', guard(() => { progress(); this.emit({ t: 'phase', phase: 'login' }) }))
     client.on('state', guard((state: string) => {
+      progress()
       if (state === 'configuration') this.emit({ t: 'phase', phase: 'login', detail: 'Configuring…' })
     }))
 
@@ -427,24 +445,21 @@ export class GameSession {
   }
 
   /**
-   * Microsoft sign-in succeeded but no Java Edition profile came back. Ask the licence list (with the
-   * token we already hold — no new sign-in) whether the account owns the game at all, so the message
-   * can say which of the two situations it is. Falls back to the neutral wording on any doubt.
+   * Microsoft sign-in succeeded but no Java Edition profile came back. The library does not say why
+   * (a missing profile, a rate limit and a server error all look the same), so ask again with the
+   * token we already hold — no new sign-in — and only then say which situation it is. Falls back
+   * to neutral wording on any doubt.
    */
   private async finishAfterLicenceCheck (bot: any, base: Classified & { kicked: boolean }) {
     if (this.diagnosing) return
     this.diagnosing = true
     let result: Classified = base
     try {
-      const owns = await Promise.race([
-        javaLicenceState(bot?._client?.authflow),
+      const state = await Promise.race([
+        javaAccountState(bot?._client?.authflow),
         new Promise<null>(resolve => setTimeout(() => resolve(null), 8000))
       ])
-      if (owns === false) {
-        result = { ...base, kind: 'ms-not-owned', reason: 'You are signed in to Microsoft, but the licences on this account do not include Minecraft: Java Edition.' }
-      } else if (owns === true) {
-        result = { ...base, kind: 'ms-profile-missing', reason: 'This Microsoft account owns Minecraft: Java Edition but has not created its player name yet. Start the official launcher once (or set the name at minecraft.net), then try again.' }
-      }
+      if (state) result = { ...base, ...describeAccountState(state) }
     } catch (err: any) {
       this.log('debug', `licence check failed: ${err?.message ?? err}`)
     } finally {
@@ -496,6 +511,10 @@ export class GameSession {
       stopSignIn(attempt, bot?._client)
     }
     if (bot) {
+      // The library stops its own timers (the 20 Hz physics loop among them) when it sees 'end'.
+      // Removing its listeners first would leave that loop — and the whole world it holds on to —
+      // running for the life of the session. Our own handlers ignore this: this.bot is already null.
+      try { bot.emit('end', 'teardown') } catch {}
       try { bot.removeAllListeners() } catch {}
       try { bot._client.removeAllListeners('block_change'); bot._client.removeAllListeners('multi_block_change') } catch {}
       // Keep an error sink so late socket errors never crash the host process.
@@ -652,6 +671,8 @@ export class GameSession {
       client.write('resource_pack_receive', body)
     }
     if (accept) { send(3); send(0) } else send(1)
+    // the server takes over again from here
+    if (this.attempt && !this.loggedIn) this.armConnectTimer(this.attempt, this.bot)
   }
 
   // ------------------------------------------------------------ interaction
@@ -845,20 +866,56 @@ export class GameSession {
   }
 }
 
-/**
- * Does the signed-in account's licence list include Java Edition?
- * true / false when Microsoft's answer is clear, null when it is not (network error, unexpected shape).
- */
-export async function javaLicenceState (authflow: any): Promise<boolean | null> {
-  if (!authflow || typeof authflow.getMinecraftJavaToken !== 'function') return null
+export interface JavaAccountState {
+  /** licence list includes Java Edition: true / false when Microsoft's answer is clear, null when not */
+  owns: boolean | null
+  /** the Java Edition profile, asked for a second time: only a 404 counts as "missing" */
+  profile: 'present' | 'missing' | 'unknown'
+}
+
+/** Ask Minecraft services about the signed-in account, using the token the sign-in already produced. */
+export async function javaAccountState (authflow: any): Promise<JavaAccountState> {
+  const out: JavaAccountState = { owns: null, profile: 'unknown' }
+  if (!authflow || typeof authflow.getMinecraftJavaToken !== 'function') return out
+  let token: unknown
   try {
     const res = await authflow.getMinecraftJavaToken({ fetchEntitlements: true })
+    token = res?.token
     const items = res?.entitlements?.items
-    if (!Array.isArray(items)) return null
-    return items.some((i: any) => typeof i?.name === 'string' && /^(product_minecraft|game_minecraft)$/.test(i.name))
+    if (Array.isArray(items)) out.owns = items.some((i: any) => typeof i?.name === 'string' && /^(product_minecraft|game_minecraft)$/.test(i.name))
   } catch {
-    return null
+    return out
   }
+  if (typeof token !== 'string' || !token || typeof authflow.mca?.fetchProfile !== 'function') return out
+  try {
+    const profile = await authflow.mca.fetchProfile(token)
+    if (profile && typeof profile.name === 'string') out.profile = 'present'
+  } catch (err: any) {
+    // the library throws "<status> <statusText> <body>"
+    if (/^404\b/.test(String(err?.message ?? ''))) out.profile = 'missing'
+  }
+  return out
+}
+
+/** Licence list only (see javaAccountState). */
+export async function javaLicenceState (authflow: any): Promise<boolean | null> {
+  return (await javaAccountState(authflow)).owns
+}
+
+/** What to tell the player after "no Java Edition profile came back". */
+export function describeAccountState (state: JavaAccountState): Pick<Classified, 'kind' | 'reason'> | {} {
+  if (state.profile === 'present') {
+    // it was there on the second request: the first one simply failed
+    return { kind: 'ms-signin', reason: 'Minecraft services did not return this account’s profile a moment ago. Try again.' }
+  }
+  if (state.profile !== 'missing') return {} // could not find out: keep the neutral wording
+  if (state.owns === true) {
+    return { kind: 'ms-profile-missing', reason: 'This Microsoft account owns Minecraft: Java Edition but has not created its player name yet. Start the official launcher once (or set the name at minecraft.net), then try again.' }
+  }
+  if (state.owns === false) {
+    return { kind: 'ms-not-owned', reason: 'You are signed in to Microsoft, but this account has no Minecraft: Java Edition profile and its licence list does not include the game. (If you play through Game Pass, start the official launcher once to create the profile.)' }
+  }
+  return {}
 }
 
 function safeMotd (msg: any): string {
@@ -920,7 +977,7 @@ const KNOWN_KEYS: Record<string, string> = {
   'multiplayer.disconnect.server_shutdown': 'Server closed',
   'multiplayer.disconnect.not_whitelisted': 'You are not white-listed on this server',
   'multiplayer.disconnect.duplicate_login': 'You logged in from another location',
-  'multiplayer.disconnect.unverified_username': 'Failed to verify username — this server requires a signed-in Microsoft account (online mode).',
+  'multiplayer.disconnect.unverified_username': 'Failed to verify username',
   'multiplayer.disconnect.outdated_client': 'Outdated client — the server runs a newer version',
   'multiplayer.disconnect.incompatible': 'Incompatible client version',
   'multiplayer.disconnect.idling': 'You have been idle for too long',

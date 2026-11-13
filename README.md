@@ -30,12 +30,14 @@ _Screenshots are captured by the automated end-to-end test (software rendering, 
 
 | Server | How | Status |
 |---|---|---|
-| 1.21.4, 1.21.11, 26.1.x | spoken natively | verified by the automated suites |
+| 1.21.4, 1.21.11, 26.1 – 26.1.2 | spoken natively | verified by the automated suites |
 | 26.3 with ViaVersion + ViaBackwards installed | Vassago joins as 26.1, the server translates | verified by the automated suites |
 | 26.2 / 26.3 without ViaBackwards | — | not supported yet (the protocol library has no 26.2/26.3 data) |
 | other versions from 1.20.2 to 26.1 | spoken natively | experimental — see [DEVELOPMENT_STATUS.md](DEVELOPMENT_STATUS.md) |
 
-The server list shows this per server, for example “26.3 · joins as 26.1 · verified”.
+The server list shows this per server, for example “26.3 · joins as 26.1 · verified”. A server is only
+called verified when its status response names one plain version; proxies that advertise a range are
+joinable but shown as experimental, because nothing says what runs behind them.
 
 See [DEVELOPMENT_STATUS.md](DEVELOPMENT_STATUS.md) for exactly what is verified, what is partial and
 what is missing — nothing is claimed that has not been tested.

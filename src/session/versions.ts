@@ -48,12 +48,12 @@ export async function pingServer (host: string, port: number, timeoutMs = 6000):
       new Promise((_resolve, reject) => setTimeout(() => reject(new Error('Timed out')), timeoutMs + 500))
     ])
     const protocol: number | undefined = res?.version?.protocol
-    const resolved = protocol != null ? versionForProtocol(protocol) : null
-    const serverVersion = translatedServerVersion(res?.version?.name, resolved, protocol)
+    const name = res?.version?.name ?? String(res?.version ?? '')
+    const { resolved, serverVersion, confirmed } = negotiate(name, protocol)
     return {
       online: true,
       latency: res.latency,
-      versionName: res?.version?.name ?? String(res?.version ?? ''),
+      versionName: name,
       protocol,
       playersOnline: res?.players?.online,
       playersMax: res?.players?.max,
@@ -62,30 +62,68 @@ export async function pingServer (host: string, port: number, timeoutMs = 6000):
       resolvedVersion: resolved ?? undefined,
       serverVersion,
       supported: resolved != null,
-      verified: isVerified(resolved, serverVersion)
+      // "Verified" needs the status name to say what the server really runs: a proxy or a
+      // translating server answers a ping with the pinging client's own protocol number.
+      verified: confirmed ? isVerified(resolved) : serverVersion ? isVerified(resolved, serverVersion) : false
     }
   } catch (err: any) {
     return { online: false, error: err?.code ?? err?.message ?? String(err) }
   }
 }
 
+export interface StatusVersion {
+  /** the status name confirms that the server runs the version we would speak (or one with the same protocol) */
+  confirmed: boolean
+  /** set when the server names a different version than the one we would speak */
+  serverVersion?: string
+}
+
+const compareVersions = (a: string, b: string): number => {
+  const x = a.split('.').map(Number); const y = b.split('.').map(Number)
+  for (let i = 0; i < Math.max(x.length, y.length); i++) { const d = (x[i] ?? 0) - (y[i] ?? 0); if (d !== 0) return d }
+  return 0
+}
+
 /**
- * When the status response names exactly one game version and it is not the one we would speak
- * (nor another release with the same protocol), the server is translating for us. Returns that
- * named version, otherwise undefined. Names that list a range ("1.8-1.21") are ignored.
+ * Read the version a status response names. Only a single, plain version says anything:
+ * ranges ("1.8-1.21", "1.21.x") and names without a version leave the question open.
  */
+export function readStatusVersion (name: unknown, resolved: string | null, protocol: number | undefined): StatusVersion {
+  if (typeof name !== 'string' || !resolved) return { confirmed: false }
+  const found = [...name.replace(/§./g, '').matchAll(/\d+\.\d+(?:\.\d+)?(\.x)?/gi)]
+  if (found.length !== 1 || found[0][1]) return { confirmed: false }
+  const named = found[0][0]
+  if (named === resolved) return { confirmed: true }
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const known = require('minecraft-data').versionsByMinecraftVersion.pc[named]
+  // e.g. 26.1.2 and 26.1 share a protocol; a known release with another protocol is being translated
+  if (known) return known.version === protocol ? { confirmed: true } : { confirmed: false, serverVersion: named }
+  // A release newer than anything in our data (26.3 today) cannot be what we speak either.
+  const newest = supportedVersions().reduce((a, b) => compareVersions(a, b) >= 0 ? a : b, '0.0')
+  return compareVersions(named, newest) > 0 ? { confirmed: false, serverVersion: named } : { confirmed: false }
+}
+
+/** Kept for callers that only want the translated server's version. */
 export function translatedServerVersion (name: unknown, resolved: string | null, protocol: number | undefined): string | undefined {
-  if (typeof name !== 'string' || !resolved) return undefined
-  const found = name.replace(/§./g, '').match(/\d+\.\d+(?:\.\d+)?/g) ?? []
-  if (found.length !== 1) return undefined
-  const named = found[0]
-  if (named === resolved) return undefined
-  try {
+  return readStatusVersion(name, resolved, protocol).serverVersion
+}
+
+/**
+ * Decide what to speak from a status response. Normally that is the newest release with the
+ * reported protocol. When the server names a version we can speak ourselves but reports another
+ * protocol (it echoed ours because it translates), speaking its own version is the better choice:
+ * no translation layer in between.
+ */
+export function negotiate (name: unknown, protocol: number | undefined): { resolved: string | null, serverVersion?: string, confirmed: boolean } {
+  const byProtocol = protocol != null ? versionForProtocol(protocol) : null
+  const status = readStatusVersion(name, byProtocol, protocol)
+  if (status.serverVersion) {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const known = require('minecraft-data').versionsByMinecraftVersion.pc[named]
-    if (known && known.version === protocol) return undefined // e.g. 26.1.2 and 26.1 share a protocol
-  } catch {}
-  return named
+    const known = require('minecraft-data').versionsByMinecraftVersion.pc[status.serverVersion]
+    const own = known ? versionForProtocol(known.version) : null
+    if (own) return { resolved: own, confirmed: true }
+  }
+  return { resolved: byProtocol, serverVersion: status.serverVersion, confirmed: status.confirmed }
 }
 
 /** Decide which version to use for a connection. Throws a descriptive error when unsupported. */

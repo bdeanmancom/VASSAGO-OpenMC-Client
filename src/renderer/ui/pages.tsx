@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { isValidUsername, parseAddress, type GraphicsPreset, type Profile, type SavedServer } from '../../shared/config'
+import { fallbackProfile, isValidUsername, parseAddress, type AppConfig, type GraphicsPreset, type Profile, type SavedServer } from '../../shared/config'
 import type { PingResult } from '../../shared/protocol'
 import { addrKey, addrLabel, hue, newId, type AppCtx, type Target } from './App'
 import { Icon, Logo, Modal, MotdText, PingBars, Segmented, Slider, Toggle, stripMotd } from './components'
@@ -10,8 +10,8 @@ function VersionBadge ({ ping }: { ping: PingResult | 'loading' | undefined }) {
   if (!ping.supported) return <span className="badge danger" title={`Protocol ${ping.protocol} is not supported by this build`}>{cleanVersion(ping.versionName)} · unsupported</span>
   // A server that says it runs another version than the one we speak is translating for us (ViaVersion/ViaBackwards).
   const label = ping.serverVersion ? `${ping.serverVersion} · joins as ${ping.resolvedVersion}` : ping.resolvedVersion
-  const via = ping.serverVersion ? ` The server runs ${ping.serverVersion} and admits older clients through a translation layer; Vassago connects as ${ping.resolvedVersion}.` : ''
-  if (ping.verified) return <span className="badge ok" title={`This version passes Vassago's integration test suite.${via}`}>{label} · verified</span>
+  const via = ping.serverVersion ? ` The server reports version ${ping.serverVersion} and translates between versions; Vassago connects as ${ping.resolvedVersion}.` : ''
+  if (ping.verified) return <span className="badge ok" title={`This combination passes Vassago's integration test suite.${via}`}>{label} · verified</span>
   return <span className="badge warn" title={`Supported by the protocol library but not yet verified by Vassago's integration tests.${via}`}>{label} · experimental</span>
 }
 
@@ -127,7 +127,12 @@ function ServerEditor ({ initial, onSave, onClose }: { initial: SavedServer | nu
     return () => { live = false; clearTimeout(t) }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [address])
-  const save = () => { if (parsed) onSave({ id: initial?.id ?? newId(), name: name.trim() || parsed.host, host: parsed.host, port: parsed.port, lastPlayed: initial?.lastPlayed }) }
+  const save = () => {
+    if (!parsed) return
+    // keep what is known about the server unless it now points somewhere else
+    const same = initial && initial.host === parsed.host && initial.port === parsed.port
+    onSave({ ...(same ? initial : {}), id: initial?.id ?? newId(), name: name.trim() || parsed.host, host: parsed.host, port: parsed.port })
+  }
   return (
     <Modal
       title={initial ? 'Edit server' : 'Add server'} onClose={onClose}
@@ -283,6 +288,14 @@ export function DirectPage ({ ctx }: { ctx: AppCtx }) {
 
 // ------------------------------------------------------------------ Profiles
 
+/**
+ * Choosing a default profile is the player saying "this is who I play as now", so servers that
+ * remembered a different profile from an earlier join follow the new default again.
+ */
+function makeDefault (c: AppConfig, id: string): AppConfig {
+  return { ...c, activeProfileId: id, recents: c.recents.map(({ pinnedProfileId, ...r }) => r) }
+}
+
 export function ProfilesPage ({ ctx }: { ctx: AppCtx }) {
   const { config, update, info, toast } = ctx
   const [adding, setAdding] = useState<'offline' | 'microsoft' | null>(null)
@@ -301,7 +314,7 @@ export function ProfilesPage ({ ctx }: { ctx: AppCtx }) {
       const p: Profile = { id: newId(), name, username: name, auth: mode }
       // A new private-server name becomes the default. A Microsoft account is only used where it is
       // asked for, unless the player makes it the default themselves.
-      update(c => ({ ...c, profiles: [...c.profiles, p], activeProfileId: p.auth === 'offline' ? p.id : c.activeProfileId }))
+      update(c => p.auth === 'offline' ? makeDefault({ ...c, profiles: [...c.profiles, p] }, p.id) : { ...c, profiles: [...c.profiles, p] })
     }
     close()
   }
@@ -310,7 +323,7 @@ export function ProfilesPage ({ ctx }: { ctx: AppCtx }) {
     if (p.auth === 'microsoft') void window.vassago.app.signOut(p.username)
     update(c => {
       const profiles = c.profiles.filter(x => x.id !== p.id)
-      return { ...c, profiles, activeProfileId: c.activeProfileId === p.id ? profiles[0].id : c.activeProfileId }
+      return c.activeProfileId === p.id ? makeDefault({ ...c, profiles }, fallbackProfile(profiles).id) : { ...c, profiles }
     })
   }
   return (
@@ -334,7 +347,7 @@ export function ProfilesPage ({ ctx }: { ctx: AppCtx }) {
             </div>
             {p.id === config.activeProfileId
               ? <span className="badge ok"><Icon name="check" size={12} /> Default</span>
-              : <button className="btn" data-testid="use-profile" onClick={() => update(c => ({ ...c, activeProfileId: p.id }))}>Make default</button>}
+              : <button className="btn" data-testid="use-profile" onClick={() => update(c => makeDefault(c, p.id))}>Make default</button>}
             {p.auth === 'offline' && <button className="icon-btn" data-testid="rename-profile" title="Change name" onClick={() => { setRenaming(p); setUsername(p.username) }}><Icon name="edit" /></button>}
             <button className="icon-btn" title={p.auth === 'microsoft' ? 'Sign out and remove' : 'Remove'} onClick={() => remove(p)}><Icon name="trash" /></button>
           </div>

@@ -137,7 +137,7 @@ export async function checkServer (target, log = console.log) {
   log(`  Vassago speaks ${result.clientVersion ?? 'NOT SUPPORTED by this build'}`)
   const named = (result.versionName.match(/\d+\.\d+(?:\.\d+)?/g) ?? [])
   if (result.clientVersion && named.length === 1 && named[0] !== result.clientVersion && mcData.versionsByMinecraftVersion.pc[named[0]]?.version !== result.protocol) {
-    log(`  Note           the server runs ${named[0]} and admits older clients through a translation layer`)
+    log(`  Note           the server names version ${named[0]} and translates between versions`)
     log('                 (ViaVersion/ViaBackwards); the protocol number above is an echo of what this check sent.')
   }
   if (!result.clientVersion) {

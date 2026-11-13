@@ -83,7 +83,8 @@ export type DisconnectKind =
 export type SessionPhase = 'idle' | 'authenticating' | 'connecting' | 'login' | 'loading' | 'playing' | 'disconnected'
 
 export type SessionEvent =
-  | { t: 'phase', phase: SessionPhase, detail?: string }
+  /** `attempt` is set on the event that opens a connection attempt; it echoes the id given with the connect command. */
+  | { t: 'phase', phase: SessionPhase, detail?: string, attempt?: number }
   | { t: 'msaCode', userCode: string, verificationUri: string, expiresIn: number }
   | { t: 'login', entityId: number, username: string, uuid: string, version: string, protocol: number, gameMode: string, dimension: string, minY: number, height: number, brand?: string }
   | { t: 'respawn', dimension: string, minY: number, height: number, gameMode: string }
@@ -111,14 +112,16 @@ export type SessionEvent =
   | { t: 'players', players: PlayerListEntry[] }
   | { t: 'resourcePack', url: string, forced: boolean, prompt?: string }
   | { t: 'dig', x: number, y: number, z: number, state: 'start' | 'done' | 'cancel', timeMs: number }
-  | { t: 'disconnect', reason: string, kicked: boolean, canReconnect: boolean, kind?: DisconnectKind, detail?: string, auth?: AuthMode }
+  /** `engineStopped`: sent by the host when the session itself died, not by a connection attempt. */
+  | { t: 'disconnect', reason: string, kicked: boolean, canReconnect: boolean, kind?: DisconnectKind, detail?: string, auth?: AuthMode, engineStopped?: boolean }
   | { t: 'error', message: string }
   | { t: 'log', level: 'debug' | 'info' | 'warn' | 'error', msg: string, data?: unknown }
 
 export interface Controls { forward: boolean, back: boolean, left: boolean, right: boolean, jump: boolean, sprint: boolean, sneak: boolean }
 
 export type SessionCommand =
-  | { t: 'connect', opts: ConnectOptions }
+  /** `attempt` identifies this connection attempt to the sender; see the `phase` event. */
+  | { t: 'connect', opts: ConnectOptions, attempt?: number }
   | { t: 'disconnect' }
   | { t: 'controls', c: Controls }
   | { t: 'look', yaw: number, pitch: number }

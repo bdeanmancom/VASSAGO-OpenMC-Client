@@ -81,7 +81,7 @@ function ensureWorker (): Worker {
     if (code !== 0 && !quitting) {
       logger.log('error', 'session', `worker exited unexpectedly (code ${code})`)
       if (win && !win.isDestroyed()) {
-        win.webContents.send('session:event', { t: 'disconnect', reason: 'The connection engine stopped unexpectedly. You can reconnect.', kicked: false, canReconnect: true })
+        win.webContents.send('session:event', { t: 'disconnect', reason: 'The connection engine stopped unexpectedly. You can reconnect.', kicked: false, canReconnect: true, engineStopped: true })
         win.webContents.send('session:event', { t: 'phase', phase: 'disconnected' })
       }
     }

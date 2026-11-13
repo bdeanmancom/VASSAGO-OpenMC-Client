@@ -24,31 +24,32 @@ describe(`Paper ${version} (client ${clientVersion}) — ${MINUTES} minute two-p
     }
     decline(op); await op.joined(port)
     decline(bob); await bob.joined(port)
+    op.vanilla('difficulty peaceful') // no mobs wandering into the test
     await op.mode('creative')
-    op.chat(`/spreadplayers ${Math.floor(op.pos.x)} ${Math.floor(op.pos.z)} 0 3 under 100 false VassagoOp`)
+    op.vanilla(`spreadplayers ${Math.floor(op.pos.x)} ${Math.floor(op.pos.z)} 0 3 under 100 false VassagoOp`)
     await sleep(1500)
     await op.until(() => op.pos.onGround, 20000, 'on the surface')
     const px = Math.floor(op.pos.x); const pz = Math.floor(op.pos.z); const ground = Math.floor(op.pos.y); const py = ground + 24
-    op.chat(`/fill ${px - 6} ${ground + 4} ${pz - 6} ${px + 6} ${ground + 60} ${pz + 6} minecraft:air`)
+    op.vanilla(`fill ${px - 6} ${ground + 4} ${pz - 6} ${px + 6} ${ground + 60} ${pz + 6} minecraft:air`)
     await sleep(400)
-    op.chat(`/fill ${px - 6} ${py} ${pz - 6} ${px + 6} ${py} ${pz + 6} minecraft:stone`)
-    op.chat(`/setblock ${px + 4} ${py + 1} ${pz - 4} minecraft:chest`)
+    op.vanilla(`fill ${px - 6} ${py} ${pz - 6} ${px + 6} ${py} ${pz + 6} minecraft:stone`)
+    op.vanilla(`setblock ${px + 4} ${py + 1} ${pz - 4} minecraft:chest`)
     const home = async (c: TestClient, dx: number) => {
-      op.chat(`/tp ${c.name} ${px + 0.5 + dx} ${py + 1} ${pz + 0.5}`)
+      op.vanilla(`tp ${c.name} ${px + 0.5 + dx} ${py + 1} ${pz + 0.5}`)
       await c.until(() => !!lost(c) || (Math.abs(c.pos.x - (px + 0.5 + dx)) < 0.01 && c.pos.onGround), 15000, `${c.name} teleport`)
       alive('teleporting')
     }
     await home(op, 0); await home(bob, 2)
-    op.chat('/gamemode creative VassagoBob')
+    op.vanilla('gamemode creative VassagoBob')
     const holdStone = async (c: TestClient) => {
       await c.until(() => !!lost(c) || (c.window?.type === 'inventory' && c.window.slots.some((s, i) => i >= 36 && i <= 44 && s?.name === 'stone')), 10000, `${c.name} has stone in the hotbar`)
       c.send({ t: 'hotbar', slot: c.window!.slots.findIndex((s, i) => i >= 36 && i <= 44 && s?.name === 'stone') - 36 })
       await sleep(200)
     }
-    op.chat('/clear @a')
+    op.vanilla('clear @a')
     // wait for the clear to arrive before giving, so a stack left over from an earlier run is not mistaken for the new one
     for (const c of [op, bob]) await c.until(() => c.window?.slots.every(s => s == null) === true, 10000, `${c.name} inventory cleared`)
-    op.chat('/give @a minecraft:stone 64')
+    op.vanilla('give @a minecraft:stone 64')
     for (const c of [op, bob]) await holdStone(c)
     await op.until(() => [...op.entities.values()].some(e => e.username === 'VassagoBob'), 15000, 'op sees bob')
     await bob.until(() => [...bob.entities.values()].some(e => e.username === 'VassagoOp'), 15000, 'bob sees op')
@@ -110,17 +111,17 @@ describe(`Paper ${version} (client ${clientVersion}) — ${MINUTES} minute two-p
 
       // die and respawn
       if (r % 4 === 1) {
-        op.chat('/gamemode survival VassagoBob')
+        op.vanilla('gamemode survival VassagoBob')
         const died = bob.waitFor('death', () => true, 15000)
-        op.chat('/kill VassagoBob'); await died
+        op.vanilla('kill VassagoBob'); await died
         const back = bob.waitFor('health', e => e.health === 20, 20000)
         bob.send({ t: 'respawn' }); await back
         await sleep(500)
-        op.chat('/gamemode creative VassagoBob')
+        op.vanilla('gamemode creative VassagoBob')
         await home(bob, 2)
-        op.chat('/clear VassagoBob')
+        op.vanilla('clear VassagoBob')
         await bob.until(() => bob.window?.slots.every(s => s == null) === true, 10000, 'bob inventory cleared')
-        op.chat('/give VassagoBob minecraft:stone 64')
+        op.vanilla('give VassagoBob minecraft:stone 64')
         await holdStone(bob)
         alive('respawning'); stats.deaths++
       }
@@ -135,9 +136,9 @@ describe(`Paper ${version} (client ${clientVersion}) — ${MINUTES} minute two-p
     expect(stats.rounds).toBeGreaterThan(MINUTES * 3)
 
     // leave the world as we found it
-    op.chat(`/spreadplayers ${px} ${pz} 0 3 under ${py} false @a`)
+    op.vanilla(`spreadplayers ${px} ${pz} 0 3 under ${py} false @a`)
     await sleep(1500)
-    op.chat(`/fill ${px - 6} ${py} ${pz - 6} ${px + 6} ${py + 2} ${pz + 6} minecraft:air`)
+    op.vanilla(`fill ${px - 6} ${py} ${pz - 6} ${px + 6} ${py + 2} ${pz + 6} minecraft:air`)
     await sleep(800)
   }, (MINUTES * 60 + 240) * 1000)
 })

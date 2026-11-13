@@ -37,8 +37,8 @@ export class TestClient {
 
   send (cmd: SessionCommand) { this.session.handle(cmd) }
 
-  connect (port: number, extra: Partial<ConnectOptions> = {}) {
-    this.send({ t: 'connect', opts: { host: '127.0.0.1', port, username: this.name, auth: 'offline', version: FORCED_VERSION, viewDistance: 4, ...extra } })
+  connect (port: number, extra: Partial<ConnectOptions> = {}, attempt?: number) {
+    this.send({ t: 'connect', opts: { host: '127.0.0.1', port, username: this.name, auth: 'offline', version: FORCED_VERSION, viewDistance: 4, ...extra }, attempt })
   }
 
   waitFor<T extends SessionEvent['t']> (type: T, pred: (e: Extract<SessionEvent, { t: T }>) => boolean = () => true, timeout = 20000): Promise<Extract<SessionEvent, { t: T }>> {
@@ -77,11 +77,17 @@ export class TestClient {
 
   chat (text: string) { this.send({ t: 'chat', text }) }
 
+  /**
+   * Run a vanilla command (operator only), e.g. `vanilla('gamemode creative')`. The `minecraft:`
+   * prefix keeps the vanilla meaning on servers where a plugin replaces /give, /tp, /gamemode…
+   */
+  vanilla (command: string) { this.chat(`/minecraft:${command}`) }
+
   /** Switch own game mode via command (operator only); no-op when already in that mode. */
   async mode (mode: 'survival' | 'creative') {
     if (this.gameMode === mode) return
     const changed = this.waitFor('gameMode', e => e.gameMode === mode)
-    this.chat(`/gamemode ${mode}`)
+    this.vanilla(`gamemode ${mode}`)
     await changed
   }
   /**
@@ -89,9 +95,9 @@ export class TestClient {
    * arrive before giving, so a stack left over from an earlier test is never mistaken for the new one.
    */
   async hold (item: string, count = 64) {
-    this.chat(`/clear ${this.name}`)
+    this.vanilla(`clear ${this.name}`)
     await this.until(() => this.window?.slots.every(s => s == null) === true, 10000, 'inventory cleared')
-    this.chat(`/give ${this.name} minecraft:${item} ${count}`)
+    this.vanilla(`give ${this.name} minecraft:${item} ${count}`)
     const inHotbar = () => this.window?.slots.findIndex((s, i) => i >= 36 && i <= 44 && s?.name === item) ?? -1
     await this.until(() => inHotbar() >= 36, 10000, `${item} in the hotbar`)
     this.send({ t: 'hotbar', slot: inHotbar() - 36 })

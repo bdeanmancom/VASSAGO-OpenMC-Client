@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { classifyError, classifyKick, describeDisconnect, translationKey } from '../../src/session/errors'
-import { javaLicenceState } from '../../src/session/session'
+import { javaLicenceState, titleText } from '../../src/session/session'
 import { OWNER_STEPS, disconnectCopy, ownerStepsText } from '../../src/shared/guidance'
 
 describe('classifyError — network', () => {
@@ -105,10 +105,11 @@ describe('classifyKick with connection context', () => {
     expect(classifyKick({ text: 'Premium only!' }, 'Premium only!', offline(true)).detail).toBe('Premium only!')
   })
   it('does not blame accounts when the server never asked to verify one', () => {
-    const c = classifyKick({ translate: 'multiplayer.disconnect.unverified_username' }, 'Failed to verify username!', offline(false))
+    // 'Failed to verify username' is what the session's own text for this key reads
+    const c = classifyKick({ translate: 'multiplayer.disconnect.unverified_username' }, 'Failed to verify username', offline(false))
     expect(c.kind).toBe('kicked')
     expect(c.reason).toMatch(/did not ask for account verification/)
-    expect(c.reason).toContain('Failed to verify username!')
+    expect(c.reason).toContain('“Failed to verify username”')
     expect(c.reason).not.toMatch(/Microsoft/)
   })
   it('keeps specific refusals as they are', () => {
@@ -121,9 +122,10 @@ describe('classifyKick with connection context', () => {
     expect(c).toEqual({ kind: 'kicked', reason: 'Invalid move player packet received', detail: 'Invalid move player packet received' })
   })
   it('tells a Microsoft profile that its session was not verified, not that it needs an account', () => {
-    const c = classifyKick({ translate: 'multiplayer.disconnect.unverified_username' }, 'Failed to verify username!', microsoft)
+    const c = classifyKick({ translate: 'multiplayer.disconnect.unverified_username' }, 'Failed to verify username', microsoft)
     expect(c.kind).toBe('kicked')
-    expect(c.reason).toMatch(/could not verify this Microsoft session/)
+    expect(c.reason).toMatch(/could not verify this Microsoft session \(“Failed to verify username”\)/)
+    expect(c.reason).not.toMatch(/requires a signed-in/)
     expect(classifyKick({ text: 'x' }, 'Authentication servers are down. Please try again later. Sorry!', microsoft).reason).toMatch(/Authentication servers are down/)
   })
 })
@@ -162,5 +164,16 @@ describe('guidance', () => {
     expect(text).toMatch(/full restart/)
     expect(text).toMatch(/whitelist does not prevent/)
     expect(text).toMatch(/firewall \/ IP allow-list or a login plugin/)
+  })
+})
+
+describe('the text the session produces for well-known kicks', () => {
+  it('does not put an explanation into the quoted server text (classifyKick supplies it)', () => {
+    const said = titleText({ translate: 'multiplayer.disconnect.unverified_username' })
+    expect(said).toBe('Failed to verify username')
+    for (const ctx of [{ auth: 'offline' as const, askedToVerify: false, loggedIn: false }, { auth: 'microsoft' as const, askedToVerify: false, loggedIn: false }]) {
+      const c = classifyKick({ translate: 'multiplayer.disconnect.unverified_username' }, said, ctx)
+      expect(c.reason).not.toMatch(/requires a signed-in Microsoft account/)
+    }
   })
 })
