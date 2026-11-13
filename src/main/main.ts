@@ -268,7 +268,7 @@ if (!E2E && !app.requestSingleInstanceLock()) {
     serveApp()
     registerIpc()
     createWindow()
-    app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
+    app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) { quitting = false; createWindow() } })
   })
 
   app.on('before-quit', () => {

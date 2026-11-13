@@ -13,8 +13,8 @@ do not assume it works.
 | Unit (`npm test`) | 37 / 37 pass | Node 22 |
 | Integration (`npm run test:integration`) | 25 / 25 pass on **1.21.11** and on **1.21.4** | PaperMC 1.21.11 (build 132) and PaperMC 1.21.4, offline-mode + online-mode profiles, Java 21, Linux x64 |
 | End-to-end (`npm run test:e2e`) | 21 / 21 steps pass on 1.21.11 | Real Electron 39 app driven by Playwright under Xvfb with software GL (SwiftShader) |
-| GitHub Actions | Run #2 green: typecheck, unit, integration, build, end-to-end, then installers **built** on `ubuntu-latest`, `windows-latest` and `macos-latest` | commit `37c3bb6` |
-| Packaging | Linux AppImage (≈125 MB), Windows NSIS installer (≈104 MB), macOS dmg + zip for arm64 and x64 produced by CI. Only the Linux unpacked build has been **launched** (joins a server and renders). | CI artifacts |
+| GitHub Actions | First fully green run: #2 (commit `37c3bb6`) — typecheck, unit, integration, build, end-to-end, then installers **built** on `ubuntu-latest`, `windows-latest` and `macos-latest`. See the Actions tab for later runs. | GitHub-hosted runners |
+| Packaging | Linux AppImage (≈125 MB), Windows NSIS installer (≈104 MB), macOS dmg + zip for arm64 and x64 produced by CI. The Linux build was also packaged locally and the **packaged** app passed the same 21-step end-to-end run. Windows and macOS packages have not been launched. | CI artifacts + local Linux x64 |
 
 Local runs and CI both used Linux for everything that executes the app. **No Windows or macOS build
 has been launched yet, and nothing has been run on a real GPU** — see "Not verified" below.

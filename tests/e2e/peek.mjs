@@ -1,3 +1,6 @@
+// Developer helper: launches the app with a pre-seeded profile, joins the local test server
+// (npm run test-server -- --accept-eula --port 25570 --resource-pack <url>), prints engine stats and saves a screenshot.
+//   RD=6 N=5 CMD='/time set noon' LOOK='0.5,-0.2' OUT=shot.png xvfb-run -a node tests/e2e/peek.mjs
 import { _electron as electron } from 'playwright'
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'
 const root = path.resolve('.')

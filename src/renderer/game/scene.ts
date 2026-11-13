@@ -363,8 +363,16 @@ export class Scene {
   }
 
   dispose () {
-    this.renderer.dispose()
+    this.opaqueMat.uniforms.uTiles.value?.dispose?.()
     this.opaqueMat.dispose(); this.transMat.dispose(); this.skyMat.dispose(); this.cloudMat.dispose()
+    for (const m of [this.sun, this.moon, this.hand]) {
+      const mat = m.material as THREE.MeshBasicMaterial
+      mat.map?.dispose(); mat.dispose(); m.geometry.dispose()
+    }
+    this.sky.geometry.dispose(); this.clouds.geometry.dispose()
+    this.renderer.dispose()
+    // Release GPU memory immediately instead of waiting for the canvas to be garbage-collected.
+    try { this.renderer.forceContextLoss() } catch {}
   }
 }
 
