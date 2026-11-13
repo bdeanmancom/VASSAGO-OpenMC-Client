@@ -368,10 +368,16 @@ describe(`Paper ${version}${FORCED_VERSION ? ` (client forced to ${FORCED_VERSIO
   it('reports damage, death and respawns', async () => {
     const hurt = op.waitFor('hurt')
     const from = op.events.length
-    op.chat('/damage VassagoOp 4')
+    // Damage that lands within half a second of an earlier knock (say, a hard landing in the test
+    // before) is ignored by the server, so ask again until the health report shows it.
+    const dropped = () => op.events.slice(from).some(e => e.t === 'health' && e.health <= 16)
+    for (let attempt = 0; attempt < 4 && !dropped(); attempt++) {
+      op.chat('/damage VassagoOp 6')
+      await op.until(dropped, 1500, 'health dropped').catch(() => {})
+    }
     await hurt
     // any report of the lower health counts: on a peaceful server it starts coming back at once
-    await op.until(() => op.events.slice(from).some(e => e.t === 'health' && e.health <= 16), 5000, 'health dropped')
+    expect(dropped(), 'health dropped').toBe(true)
     const death = op.waitFor('death')
     op.chat('/kill VassagoOp')
     await death
