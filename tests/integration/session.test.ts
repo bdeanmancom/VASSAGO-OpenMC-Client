@@ -328,8 +328,9 @@ describe(`Paper ${version}${FORCED_VERSION ? ` (client forced to ${FORCED_VERSIO
     op.send({ t: 'look', yaw: 0, pitch: -0.3 })
     op.send({ t: 'attack', id: pig.id })
     await hurt
-    op.chat('/kill @e[type=minecraft:pig]')
-    await op.until(() => ![...op.entities.values()].some(e => e.name === 'pig'), 10000, 'pig removed')
+    // our pig, by id: the world may hold pigs of its own, and they are none of this test's business
+    op.chat(`/kill @e[type=minecraft:pig,distance=..8]`)
+    await op.until(() => !op.entities.has(pig.id), 15000, 'pig removed')
   })
 
   it('flies in creative mode without being corrected by the server', async () => {

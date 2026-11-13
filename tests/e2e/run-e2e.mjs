@@ -365,25 +365,32 @@ try {
     await sleep(500)
     await game(() => window.__vassago.game.setLook(-Math.PI / 2, 0))
     await until(async () => { const t = (await state()).target; return t && t.x === bx && t.y === by && t.z === bz }, 8000, 'target on the block')
-    // hold the dig button the way the input handler does
+    // Sampled inside the page, every frame-ish: at software-rendering speed a round trip from here
+    // (let alone a screenshot) takes longer than a crack stage lasts.
+    await page.evaluate(() => {
+      const seen = window.__fxSeen = { stages: [], particles: 0, swings: 0, lastAge: 1e9 }
+      seen.timer = setInterval(() => {
+        const fx = window.__vassago?.game.debugState().fx
+        if (!fx) return
+        if (fx.crack >= 0 && !seen.stages.includes(fx.crack)) seen.stages.push(fx.crack)
+        seen.particles = Math.max(seen.particles, fx.particles)
+        if (fx.swingAgeMs < seen.lastAge) seen.swings++
+        seen.lastAge = fx.swingAgeMs
+      }, 25)
+    })
     await game(() => { const g = window.__vassago.game; g.leftDown = true; g.primaryAction() })
-    const seen = { stages: new Set(), particles: 0, swings: 0 }
-    let lastSwingAge = 1e9
     const t0 = Date.now()
     let shotTaken = false
-    while (Date.now() - t0 < 12000) {
-      const st = await state()
-      if (st.fx.crack >= 0) seen.stages.add(st.fx.crack)
-      seen.particles = Math.max(seen.particles, st.fx.particles)
-      if (st.fx.swingAgeMs < lastSwingAge) seen.swings++
-      lastSwingAge = st.fx.swingAgeMs
-      if (!shotTaken && st.fx.crack >= 4) { await shot('13b-breaking.png'); shotTaken = true }
+    while (Date.now() - t0 < 15000) {
+      if (!shotTaken && (await state()).fx.crack >= 4) { await shot('13b-breaking.png'); shotTaken = true }
       if (await page.evaluate(k => window.__vassago.game.world.getBlock(k[0], k[1], k[2]), [bx, by, bz]) === 0) break
       await sleep(60)
     }
+    const burst = (await state()).fx.particles
+    const sampled = await page.evaluate(() => { const s = window.__fxSeen; clearInterval(s.timer); return { stages: s.stages, particles: s.particles, swings: s.swings } })
+    const seen = { stages: new Set(sampled.stages), particles: sampled.particles, swings: sampled.swings }
     await game(() => { const g = window.__vassago.game; g.leftDown = false; g.stopDig() })
     if (await page.evaluate(k => window.__vassago.game.world.getBlock(k[0], k[1], k[2]), [bx, by, bz]) !== 0) throw new Error('the block did not break')
-    const burst = (await state()).fx.particles
     if (seen.stages.size < 3) throw new Error(`cracks did not progress: stages seen ${[...seen.stages]}`)
     if (Math.max(...seen.stages) < 5) throw new Error(`cracks stopped early: stages seen ${[...seen.stages]}`)
     if (seen.particles < 2) throw new Error('no fragments while digging')
