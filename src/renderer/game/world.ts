@@ -8,6 +8,7 @@ import type { SectionDTO } from '../../shared/protocol'
 import type { MesherRequest, MesherResponse } from './mesher.worker'
 import type { MeshData } from './mesher'
 import { tablesOf, type Registry } from './registry'
+import { repairSkyColumn } from './skylight'
 
 const SharedBuf: typeof ArrayBuffer = (typeof SharedArrayBuffer !== 'undefined' && (globalThis as any).crossOriginIsolated !== false)
   ? (SharedArrayBuffer as unknown as typeof ArrayBuffer)
@@ -103,6 +104,7 @@ export class World {
         translucent: null
       }))
     }
+    this.repairSkyLight(col)
     this.columns.set(key(x, z), col)
     // This column and any neighbour that just became fully surrounded can now be meshed.
     for (let dx = -1; dx <= 1; dx++) {
@@ -139,6 +141,11 @@ export class World {
       if (i > 0) this.touch(col, i - 1)
       if (i + 1 < col.sections.length) this.touch(col, i + 1)
     }
+    this.repairSkyLight(col)
+  }
+
+  private repairSkyLight (col: Column) {
+    repairSkyColumn(col.sections, this.reg.filter, fill => new Uint8Array(new SharedBuf(4096)).fill(fill))
   }
 
   unloadChunk (x: number, z: number) {

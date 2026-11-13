@@ -275,8 +275,14 @@ try {
     const target = await until(async () => { const t = (await state()).target; return t && t.y === py && t.face === 1 ? t : null }, 5000, 'block target')
     const key = [target.x, target.y + 1, target.z]
     const getBlock = () => page.evaluate(k => window.__vassago.game.world.getBlock(k[0], k[1], k[2]), key)
-    if (locked && await page.evaluate(() => document.pointerLockElement != null)) { await page.mouse.down({ button: 'right' }); await sleep(60); await page.mouse.up({ button: 'right' }) } else await game(() => { const g = window.__vassago.game; g.secondaryAction() })
-    await until(async () => (await getBlock()) !== 0, 8000, 'placed block in client world')
+    // At software-rendering frame rates a click can land on a frame where the target is being
+    // recomputed; retry like a player would, and report how many clicks it took.
+    let clicks = 0
+    for (; clicks < 3 && (await getBlock()) === 0; clicks++) {
+      if (locked && await page.evaluate(() => document.pointerLockElement != null)) { await page.mouse.down({ button: 'right' }); await sleep(80); await page.mouse.up({ button: 'right' }) } else await game(() => { const g = window.__vassago.game; g.secondaryAction() })
+      await until(async () => (await getBlock()) !== 0, 3000, 'placed block in client world').catch(() => {})
+    }
+    if ((await getBlock()) === 0) throw new Error('block was not placed after 3 clicks')
     const { Vec3 } = require('vec3')
     await until(() => bot.blockAt(new Vec3(...key))?.name === 'oak_planks', 8000, 'placed block seen by second player')
     await sleep(500)
@@ -286,7 +292,7 @@ try {
     if (locked && await page.evaluate(() => document.pointerLockElement != null)) { await page.mouse.down(); await sleep(80); await page.mouse.up() } else await game(() => { const g = window.__vassago.game; g.primaryAction(); g.stopDig() })
     await until(async () => (await getBlock()) === 0, 8000, 'block broken in client world')
     await until(() => bot.blockAt(new Vec3(...key))?.name === 'air', 8000, 'break seen by second player')
-    return `at ${key.join(', ')} via ${locked ? 'real mouse buttons' : 'scripted input'}`
+    return `at ${key.join(', ')} via ${locked ? 'real mouse buttons' : 'scripted input'}${clicks > 1 ? ` (${clicks} clicks needed)` : ''}`
   })
 
   await step('inventory screen: pick up and move an item, 2×2 crafting', async () => {

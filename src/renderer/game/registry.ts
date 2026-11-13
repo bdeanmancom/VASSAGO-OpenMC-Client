@@ -51,6 +51,8 @@ export interface RegistryTables {
 export interface Registry extends RegistryTables {
   data: GameData
   blockOfState: Uint16Array
+  /** sky-light attenuation per state (0 = fully transparent to sky light, 15 = opaque) */
+  filter: Uint8Array
   tileKeys: string[]
   blockByName: Map<string, GameDataBlock>
   itemById: Map<number, { id: number, n: string, d: string, ss: number }>
@@ -88,6 +90,7 @@ export function buildRegistry (data: GameData, lookFor: LookFn, containsWater: W
   const boxCount = new Uint8Array(stateCount)
   const liquidLevel = new Uint8Array(stateCount)
   const blockOfState = new Uint16Array(stateCount)
+  const filter = new Uint8Array(stateCount)
   const boxData: number[] = []
   const tileKeys: string[] = []
   const tileIndex = new Map<string, number>()
@@ -120,6 +123,7 @@ export function buildRegistry (data: GameData, lookFor: LookFn, containsWater: W
     blockByName.set(block.n, block)
     for (let s = block.min; s <= block.max; s++) {
       blockOfState[s] = bi
+      filter[s] = Math.max(0, Math.min(15, block.fl | 0))
       const shapeIdx = Array.isArray(block.s) ? block.s[s - block.min] : block.s
       const shape = data.shapes[shapeIdx] ?? []
       const props = block.p.length > 0 ? decodeProps(block, s) : {}
@@ -181,6 +185,7 @@ export function buildRegistry (data: GameData, lookFor: LookFn, containsWater: W
     waterTop,
     waterSide,
     blockOfState,
+    filter,
     tileKeys,
     blockByName,
     itemById: new Map(data.items.map(i => [i.id, i])),
