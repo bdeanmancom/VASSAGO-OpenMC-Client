@@ -219,8 +219,11 @@ export class Entities {
       const headPivot = new THREE.Group(); headPivot.position.y = 24 * PX; head.position.y = 4 * PX; headPivot.add(head)
       const torso = box(8 * PX, 12 * PX, 4 * PX, shirt); torso.position.y = 18 * PX
       const mkLimb = (x: number, y: number, m: THREE.Material) => { const l = box(4 * PX, 12 * PX, 4 * PX, m, true); l.position.set(x, y, 0); return l }
-      const la = mkLimb(-6 * PX, 24 * PX, colors.sleeves ? shirt : skin); const ra = mkLimb(6 * PX, 24 * PX, colors.sleeves ? shirt : skin)
-      const ll = mkLimb(-2 * PX, 12 * PX, pants); const rl = mkLimb(2 * PX, 12 * PX, pants)
+      // slightly different shades so limbs read as separate shapes
+      const sleeve = mat((colors.sleeves ? colors.shirt : colors.skin).clone().multiplyScalar(0.86))
+      const pantsDark = mat(colors.pants.clone().multiplyScalar(0.84))
+      const la = mkLimb(-6 * PX, 24 * PX, sleeve); const ra = mkLimb(6 * PX, 24 * PX, sleeve)
+      const ll = mkLimb(-2 * PX, 12 * PX, pants); const rl = mkLimb(2 * PX, 12 * PX, pantsDark)
       body.add(headPivot, torso, la, ra, ll, rl)
       root.add(body)
       t.limbs = { head: headPivot, leftArm: la, rightArm: ra, leftLeg: ll, rightLeg: rl }

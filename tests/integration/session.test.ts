@@ -59,8 +59,7 @@ describe(`Paper ${version} — offline-mode server`, () => {
   })
 
   it('builds a test platform using operator commands (chat commands work)', async () => {
-    op.chat('/gamemode creative')
-    await op.waitFor('gameMode', e => e.gameMode === 'creative')
+    await op.mode('creative')
     // start from the surface no matter where a previous run left this player
     op.chat(`/spreadplayers ${Math.floor(op.pos.x)} ${Math.floor(op.pos.z)} 0 3 under 100 false VassagoOp`)
     await sleep(1500)
@@ -75,8 +74,7 @@ describe(`Paper ${version} — offline-mode server`, () => {
     await op.until(() => op.blocks.has(`${px},${py},${pz}`), 15000, 'platform block updates')
     op.chat(`/tp VassagoOp ${px + 0.5} ${py + 1} ${pz + 0.5}`)
     await op.until(() => Math.abs(op.pos.y - (py + 1)) < 0.01 && op.pos.onGround, 15000, 'teleport onto platform')
-    op.chat('/gamemode survival')
-    await op.waitFor('gameMode', e => e.gameMode === 'survival')
+    await op.mode('survival')
   })
 
   it('walks, sprints and jumps with server-accepted movement', async () => {
@@ -126,12 +124,12 @@ describe(`Paper ${version} — offline-mode server`, () => {
     const back = bob.waitFor('chat', e => e.plain.includes('hi bob, op here'))
     op.chat('hi bob, op here')
     await back
-    await op.until(() => Math.abs(op.pos.x - (px + 0.5)) < 0.01 && op.pos.onGround, 30000, 'landing back in the overworld')
+    await op.until(() => Math.abs(op.pos.x - (px + 0.5)) < 0.01 && op.pos.onGround, 60000, 'landing back in the overworld')
+    await op.mode('survival')
   })
 
   it('places and breaks blocks, visible to the other player', async () => {
-    op.chat('/gamemode creative')
-    await op.waitFor('gameMode', e => e.gameMode === 'creative')
+    await op.mode('creative')
     op.chat('/clear VassagoOp')
     op.chat('/give VassagoOp minecraft:stone 64')
     await op.until(() => op.window?.slots.some(s => s?.name === 'stone') === true, 10000, 'stone in inventory')
@@ -153,8 +151,7 @@ describe(`Paper ${version} — offline-mode server`, () => {
   })
 
   it('breaks blocks in survival with timed digging', async () => {
-    op.chat('/gamemode survival')
-    await op.waitFor('gameMode', e => e.gameMode === 'survival')
+    await op.mode('survival')
     const tx = px - 1; const tz = pz
     op.chat(`/setblock ${tx} ${py + 1} ${tz} minecraft:dirt`)
     const key = `${tx},${py + 1},${tz}`
@@ -189,7 +186,8 @@ describe(`Paper ${version} — offline-mode server`, () => {
     await op.until(() => op.window?.cursor?.name === 'oak_planks', 5000, 'took craft result')
     op.send({ t: 'windowClick', slot: 21, button: 0, mode: 0 })
     await op.until(() => op.window?.slots[21]?.name === 'oak_planks' && op.window?.slots[21]?.count === 4, 5000, 'planks stored')
-    expect(op.window!.slots[1]).toBeNull()
+    // the consumed ingredient disappears (server correction on 1.21.5+, client prediction before)
+    await op.until(() => op.window?.slots[1] == null, 5000, 'ingredient consumed')
   })
 
   it('opens a container, moves an item into it and closes it', async () => {
@@ -213,8 +211,7 @@ describe(`Paper ${version} — offline-mode server`, () => {
   })
 
   it('uses held items (water bucket) and attacks entities', async () => {
-    op.chat('/gamemode creative')
-    await op.waitFor('gameMode', e => e.gameMode === 'creative')
+    await op.mode('creative')
     op.chat(`/tp VassagoOp ${px + 0.5} ${py + 1} ${pz + 0.5}`)
     await op.until(() => Math.abs(op.pos.x - (px + 0.5)) < 0.01 && op.pos.onGround, 10000, 'teleport')
     op.chat('/clear VassagoOp')
@@ -235,14 +232,45 @@ describe(`Paper ${version} — offline-mode server`, () => {
     await op.until(() => [...op.entities.values()].some(isOurPig), 10000, 'pig spawned')
     const pig = [...op.entities.values()].find(isOurPig)
     expect(pig.width).toBeGreaterThan(0.5)
-    op.chat('/gamemode survival')
-    await op.waitFor('gameMode', e => e.gameMode === 'survival')
+    await op.mode('survival')
     const hurt = op.waitFor('entityAnim', e => e.id === pig.id && e.anim === 'hurt', 10000)
     op.send({ t: 'look', yaw: 0, pitch: -0.3 })
     op.send({ t: 'attack', id: pig.id })
     await hurt
     op.chat('/kill @e[type=minecraft:pig]')
     await op.until(() => ![...op.entities.values()].some(e => e.name === 'pig'), 10000, 'pig removed')
+  })
+
+  it('flies in creative mode without being corrected by the server', async () => {
+    await op.mode('creative')
+    op.chat(`/tp VassagoOp ${px + 0.5} ${py + 1} ${pz + 0.5}`)
+    await op.until(() => Math.abs(op.pos.x - (px + 0.5)) < 0.01 && Math.abs(op.pos.y - (py + 1)) < 0.01, 10000, 'teleport')
+    const idle = { forward: false, back: false, left: false, right: false, jump: false, sprint: false, sneak: false }
+    op.send({ t: 'fly', flying: true })
+    op.send({ t: 'controls', c: { ...idle, jump: true } })
+    await sleep(1500)
+    op.send({ t: 'controls', c: idle })
+    await sleep(600)
+    const high = op.pos.y
+    expect(high - (py + 1)).toBeGreaterThan(4) // far above jump height
+    await sleep(800)
+    expect(Math.abs(op.pos.y - high)).toBeLessThan(0.6) // hovering, not falling
+    op.send({ t: 'look', yaw: 0, pitch: 0 })
+    op.send({ t: 'controls', c: { ...idle, forward: true } })
+    await sleep(800)
+    op.send({ t: 'controls', c: idle })
+    expect(pz + 0.5 - op.pos.z).toBeGreaterThan(2)
+    // once the glide has stopped we stay put: the server is not dragging us back
+    await sleep(1500)
+    const before = { ...op.pos }
+    await sleep(700)
+    expect(Math.abs(op.pos.x - before.x) + Math.abs(op.pos.z - before.z)).toBeLessThan(0.3)
+    expect(pz + 0.5 - op.pos.z).toBeGreaterThan(2)
+    op.send({ t: 'fly', flying: false })
+    await op.until(() => op.pos.onGround, 10000, 'landing after flight')
+    await op.mode('survival')
+    op.chat(`/tp VassagoOp ${px + 0.5} ${py + 1} ${pz + 0.5}`)
+    await op.until(() => Math.abs(op.pos.x - (px + 0.5)) < 0.01 && op.pos.onGround, 10000, 'teleport back')
   })
 
   it('reports damage, death and respawns', async () => {
@@ -259,6 +287,8 @@ describe(`Paper ${version} — offline-mode server`, () => {
   })
 
   it('handles dimension transitions', async () => {
+    // creative: the arrival point may be inside rock or above lava, and chunk generation can be slow
+    await op.mode('creative')
     const respawn = op.waitFor('respawn', e => e.dimension.includes('nether'), 30000)
     op.chunks.clear()
     op.chat('/execute in minecraft:the_nether run tp VassagoOp 0 120 0')
@@ -268,7 +298,8 @@ describe(`Paper ${version} — offline-mode server`, () => {
     const back = op.waitFor('respawn', e => e.dimension.includes('overworld'), 30000)
     op.chat(`/execute in minecraft:overworld run tp VassagoOp ${px + 0.5} ${py + 1} ${pz + 0.5}`)
     await back
-    await op.until(() => Math.abs(op.pos.x - (px + 0.5)) < 0.01 && op.pos.onGround, 30000, 'landing back in the overworld')
+    await op.until(() => Math.abs(op.pos.x - (px + 0.5)) < 0.01 && op.pos.onGround, 60000, 'landing back in the overworld')
+    await op.mode('survival')
   })
 
   it('cleans up the test platform', async () => {

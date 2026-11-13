@@ -10,10 +10,12 @@ export class TestClient {
   blocks = new Map<string, number>()
   window: Extract<SessionEvent, { t: 'window' }>['w'] | null = null
   entities = new Map<number, any>()
+  gameMode = ''
 
   constructor (public name: string) {
     this.session = new GameSession({
       emit: (ev) => {
+        if (ev.t === 'login' || ev.t === 'gameMode' || ev.t === 'respawn') this.gameMode = ev.gameMode
         if (ev.t === 'self') this.pos = { x: ev.x, y: ev.y, z: ev.z, onGround: ev.onGround }
         else if (ev.t === 'chunk') this.chunks.set(`${ev.x},${ev.z}`, ev)
         else if (ev.t === 'blocks') { for (let i = 0; i < ev.updates.length; i += 4) this.blocks.set(`${ev.updates[i]},${ev.updates[i + 1]},${ev.updates[i + 2]}`, ev.updates[i + 3]) } else if (ev.t === 'window') this.window = ev.w
@@ -67,6 +69,14 @@ export class TestClient {
   }
 
   chat (text: string) { this.send({ t: 'chat', text }) }
+
+  /** Switch own game mode via command (operator only); no-op when already in that mode. */
+  async mode (mode: 'survival' | 'creative') {
+    if (this.gameMode === mode) return
+    const changed = this.waitFor('gameMode', e => e.gameMode === mode)
+    this.chat(`/gamemode ${mode}`)
+    await changed
+  }
   close () { this.send({ t: 'disconnect' }) }
 }
 

@@ -157,7 +157,7 @@ export class Scene {
   private fogColor = new THREE.Color()
   private handScene = new THREE.Scene()
   private handCamera = new THREE.PerspectiveCamera(60, 1, 0.05, 10)
-  private hand = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.62), new THREE.MeshBasicMaterial({ transparent: true, alphaTest: 0.2, side: THREE.DoubleSide }))
+  private hand = new THREE.Mesh(new THREE.PlaneGeometry(0.46, 0.46), new THREE.MeshBasicMaterial({ transparent: true, alphaTest: 0.2, side: THREE.DoubleSide }))
   /** Current sky/day brightness 0..1 for entity lighting. */
   dayLight = 1
   ambient = 0.03
@@ -170,6 +170,7 @@ export class Scene {
     this.renderer.outputColorSpace = THREE.LinearSRGBColorSpace
     this.renderer.setClearColor(0x0b0d14)
     this.renderer.sortObjects = true
+    this.renderer.info.autoReset = false
 
     const uniforms = () => ({
       uTiles: { value: tiles },
@@ -330,6 +331,7 @@ export class Scene {
 
   render () {
     const r = this.renderer
+    r.info.reset() // stats cover the world pass and the hand overlay together
     r.render(this.scene, this.camera)
     if (this.hand.visible) {
       r.autoClear = false
@@ -355,8 +357,8 @@ export class Scene {
   updateHand (swing: number, bobX: number, bobY: number, brightness: number, equip: number) {
     if (!this.hand.visible) return
     const s = Math.sin(swing * Math.PI)
-    this.hand.position.set(0.62 + bobX - s * 0.28, -0.52 + bobY - s * 0.12 - (1 - equip) * 0.6, -1.05 - s * 0.25)
-    this.hand.rotation.set(-0.15 - s * 0.9, -0.55 + s * 0.35, 0.08)
+    this.hand.position.set(0.66 + bobX - s * 0.3, -0.46 + bobY - s * 0.1 - (1 - equip) * 0.6, -1.1 - s * 0.25)
+    this.hand.rotation.set(-0.08 - s * 0.9, -0.38 + s * 0.3, 0.06)
     ;(this.hand.material as THREE.MeshBasicMaterial).color.setScalar(Math.max(0.25, brightness))
   }
 

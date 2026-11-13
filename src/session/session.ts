@@ -488,8 +488,7 @@ export class GameSession {
     if (on && mode !== 'creative' && mode !== 'spectator') return
     if (on === this.flying) return
     this.flying = on
-    const mcData = bot.registry
-    bot.physics.gravity = on ? 0 : (mcData?.version?.['>=']?.('1.0') ? 0.08 : 0.08)
+    bot.physics.gravity = on ? 0 : 0.08
     try { bot._client.write('abilities', { flags: on ? 2 : 0 }) } catch {}
     this.applyControls(this.controls)
   }
@@ -502,7 +501,7 @@ export class GameSession {
     const target = (c.jump ? 0.42 : 0) - (c.sneak ? 0.42 : 0)
     v.y = v.y * 0.6 + target * 0.4
     const boost = c.sprint ? 1.9 : 1.45
-    if (c.forward || c.back || c.left || c.right) { v.x *= boost; v.z *= boost }
+    if (c.forward || c.back || c.left || c.right) { v.x *= boost; v.z *= boost } else { v.x *= 0.9; v.z *= 0.9 } // extra air-brake when idle
     const max = c.sprint ? 1.1 : 0.55
     const h = Math.hypot(v.x, v.z)
     if (h > max) { v.x *= max / h; v.z *= max / h }
