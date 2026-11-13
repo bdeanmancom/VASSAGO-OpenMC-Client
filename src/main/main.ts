@@ -271,9 +271,14 @@ if (!E2E && !app.requestSingleInstanceLock()) {
     // so it can never be picked up silently by a later sign-in.
     try {
       const listed = config.load().profiles.filter(p => p.auth === 'microsoft').map(p => p.username)
-      for (const account of orphanedAccounts(secure.keys(), listed)) {
-        secure.forget(account)
-        logger.log('info', 'main', 'forgot a stored sign-in that no listed account uses')
+      if (config.unreadable) {
+        // The profile list is unknown, not empty: keep the sign-ins for when the file is restored.
+        logger.log('warn', 'main', 'the settings file could not be read and was set aside as config.json.corrupt; stored sign-ins were left untouched')
+      } else {
+        for (const account of orphanedAccounts(secure.keys(), listed)) {
+          secure.forget(account)
+          logger.log('info', 'main', 'forgot a stored sign-in that no listed account uses')
+        }
       }
     } catch (err) { logger.log('warn', 'main', `could not check stored sign-ins: ${String(err)}`) }
     if (process.platform !== 'darwin') Menu.setApplicationMenu(null)

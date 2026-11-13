@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { defaultConfig, fallbackProfile, isValidUsername, parseAddress, sanitizeConfig } from '../../src/shared/config'
 import { describeDisconnect } from '../../src/session/errors'
 import { titleText } from '../../src/session/session'
-import { negotiate, pingProtocol, readStatusVersion, translatedServerVersion, versionForProtocol } from '../../src/session/versions'
+import { negotiate, pingProtocol, readStatusVersion, supportedVersions, translatedServerVersion, versionForProtocol } from '../../src/session/versions'
 import { accountOfTokenKey, orphanedAccounts, tokenKey } from '../../src/shared/tokens'
 import { VERIFIED_TRANSLATED, VERIFIED_VERSIONS, isVerified } from '../../src/shared/protocol'
 
@@ -110,6 +110,19 @@ describe('server version detection', () => {
     for (const name of ['Velocity 1.7.2-26.1', 'BungeeCord 1.8.x-1.21.x', 'Paper 1.21.x', 'MyNetwork', 'MyNetwork 2.0', '']) {
       expect(readStatusVersion(name, '26.1', 775)).toEqual({ confirmed: false })
     }
+  })
+  it('only offers versions it has game data for', () => {
+    const all = supportedVersions()
+    expect(all[0]).toBe('1.20.2')
+    expect(all).toContain('1.21.4')
+    expect(all).toContain('26.1')
+    expect(all).not.toContain('1.20.1')
+    expect(all).not.toContain('1.8.8')
+    // an older server, natively or behind a translation plugin, is never "spoken as itself"
+    expect(versionForProtocol(763)).toBeNull() // 1.20.1
+    expect(negotiate('Paper 1.20.1', 763).resolved).toBeNull()
+    expect(negotiate('Paper 1.20.1', 775)).toEqual({ resolved: '26.1', serverVersion: '1.20.1', confirmed: false })
+    expect(negotiate('Paper 1.16.5', 775)).toEqual({ resolved: '26.1', serverVersion: '1.16.5', confirmed: false })
   })
   it('negotiates the version to speak, and whether the result counts as verified', () => {
     // native servers

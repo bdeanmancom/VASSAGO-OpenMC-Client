@@ -31,7 +31,7 @@ _Screenshots are captured by the automated end-to-end test (software rendering, 
 | Server | How | Checked on every push by |
 |---|---|---|
 | 1.21.11 | spoken natively | integration and end-to-end suites |
-| 1.21.4, 26.1 – 26.1.2 | spoken natively | integration suite |
+| 1.21.4, 26.1.2 | spoken natively | integration suite (26.1 and 26.1.1 use the same protocol as 26.1.2 but are not run) |
 | 26.3 with ViaVersion + ViaBackwards installed | Vassago joins as 26.1, the server translates | integration suite, two-player soak, end-to-end suite |
 | 26.2 / 26.3 without ViaBackwards | — | not supported yet (the protocol library has no 26.2/26.3 data) |
 | other versions from 1.20.2 to 26.1 | spoken natively | nothing — experimental, see [DEVELOPMENT_STATUS.md](DEVELOPMENT_STATUS.md) |

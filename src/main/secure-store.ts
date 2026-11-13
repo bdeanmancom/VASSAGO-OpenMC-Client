@@ -6,6 +6,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { safeStorage } from 'electron'
+import { accountOfTokenKey } from '../shared/tokens'
 
 export class SecureStore {
   private file: string
@@ -44,9 +45,9 @@ export class SecureStore {
 
   /** Remove every cached token for an account. */
   forget (username: string): void {
-    const prefix = `msa:${username}:`
-    for (const k of [...this.memory.keys()]) if (k.startsWith(prefix)) this.memory.delete(k)
-    for (const k of Object.keys(this.data)) if (k.startsWith(prefix)) delete this.data[k]
+    // exact account, not a prefix: "team" must not take "team:alice" with it
+    for (const k of [...this.memory.keys()]) if (accountOfTokenKey(k) === username) this.memory.delete(k)
+    for (const k of Object.keys(this.data)) if (accountOfTokenKey(k) === username) delete this.data[k]
     try { fs.writeFileSync(this.file, JSON.stringify(this.data), { mode: 0o600 }) } catch {}
   }
 }

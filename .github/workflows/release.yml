@@ -32,6 +32,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Tag must match package.json and must not point at another commit
+        shell: bash # with pipefail: a failing ls-remote must fail the step, not look like "no such tag"
         env:
           TAG: ${{ inputs.tag || github.ref_name }}
         run: |
@@ -57,10 +58,9 @@ jobs:
         include:
           - { name: linux, os: ubuntu-latest, script: 'dist:linux' }
           - { name: windows, os: windows-latest, script: 'dist:win' }
-          # GitHub sometimes has no hosted macOS runner for an image and cancels the job unrun.
-          # Two images are tried; they build the same files and either result is used.
+          # macos-15 rather than macos-latest: GitHub repeatedly had no runner for the newest image
+          # and cancelled the job unrun. If that happens here too, see the publish job.
           - { name: macos, os: macos-15, script: 'dist:mac' }
-          - { name: macos-alt, os: macos-latest, script: 'dist:mac' }
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
@@ -92,9 +92,12 @@ jobs:
   publish:
     name: Publish GitHub Release
     needs: [check, build]
-    # Publish whatever was built even if one build job did not run; the last step then fails
-    # the run if a platform is missing, and "Re-run failed jobs" completes the release later.
-    if: ${{ always() && needs.check.result == 'success' }}
+    # A build job that GitHub cancelled for lack of a runner must not hold the release back:
+    # whatever was built is published, the last step then fails the run if a platform is missing,
+    # and "Re-run failed jobs" completes the same release later. A build job that FAILED is
+    # different — then nothing is published and no tag is created, so the fix can use the tag.
+    # Cancelling the run by hand stops publication as well.
+    if: ${{ !cancelled() && needs.check.result == 'success' && needs.build.result != 'failure' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write

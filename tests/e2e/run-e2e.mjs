@@ -57,8 +57,10 @@ const profile = { version: SERVER_VERSION, build: process.env.VASSAGO_TEST_BUILD
 // VASSAGO_APP_PATH=<packaged executable> tests an installed/unpacked build instead of the dev tree.
 const packaged = process.env.VASSAGO_APP_PATH
 if (!packaged && process.env.VASSAGO_E2E_NO_BUILD !== '1') {
-  // The dev tree is launched from dist/. Build it first, so the result always describes the
-  // current source and never an older build that happens to be lying around.
+  // The dev tree is launched from dist/. Build it first, so the result describes the current
+  // source and not an older build that happens to be lying around. (The generated game-data
+  // tables are only created when missing; `npm run gen:data` refreshes them after a change to
+  // the generator or to minecraft-data.)
   console.log('building…')
   for (const script of [['scripts/gen-blockdata.mjs', '--if-missing'], ['scripts/build.mjs']]) {
     const r = spawnSync(process.execPath, script, { cwd: root, stdio: ['ignore', 'ignore', 'inherit'] })

@@ -12,9 +12,21 @@ const mineflayer = require('mineflayer')
 
 export type { PingResult } from '../shared/protocol'
 
+/** The oldest version the app ships game data for (see scripts/gen-blockdata.mjs). */
+export const OLDEST_SUPPORTED = '1.20.2'
+
+/**
+ * Versions the client can really play on: spoken by the protocol stack AND covered by the game
+ * data the renderer needs. Older ones would log in and then fail for lack of that data.
+ */
 export function supportedVersions (): string[] {
+  // Decided from the version table alone: asking minecraft-data for each version would load every
+  // version's full data set (about 100 MB) just to compare release order.
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const table = require('minecraft-data').versionsByMinecraftVersion.pc
+  const floor: number = table[OLDEST_SUPPORTED].dataVersion
   const tested: string[] = mineflayer.testedVersions ?? []
-  return tested.filter(v => mc.supportedVersions.includes(v))
+  return tested.filter(v => mc.supportedVersions.includes(v) && table[v] != null && table[v].dataVersion >= floor)
 }
 
 /** Map a protocol number to the newest release we can speak with that protocol. */

@@ -30,9 +30,10 @@ Two workflows build installers:
   `v0.2.0`) or by pushing a `v*` tag. It builds all three platforms and attaches the installers
   plus `SHA256SUMS.txt` to a GitHub Release, using `docs/RELEASE_NOTES.md` as the text. The tag has
   to match the version in `package.json`, and an existing tag is never re-used for another commit.
-  GitHub sometimes has no hosted macOS runner and cancels that job without running it; the workflow
-  therefore tries two macOS images, publishes whatever was built, and fails if a platform is missing —
-  "Re-run failed jobs" on that run then completes the same release.
+  GitHub sometimes has no hosted macOS runner and cancels that job without running it. In that case
+  the workflow still publishes what was built and then fails, naming the missing platform;
+  "Re-run failed jobs" on that run completes the same release. If a build job really fails, nothing
+  is published and no tag is created. Cancelling the run by hand also stops publication.
 
 ## What goes into a package
 

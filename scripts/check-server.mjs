@@ -57,7 +57,9 @@ function flatten (c) {
 
 /** Newest release this client can speak for a protocol number, or null. */
 export function versionForProtocol (protocol) {
-  const supported = (mineflayer.testedVersions ?? []).filter(v => mc.supportedVersions.includes(v))
+  // the same list as the app: spoken by the protocol stack and covered by its game data (1.20.2+)
+  const table = mcData.versionsByMinecraftVersion.pc
+  const supported = (mineflayer.testedVersions ?? []).filter(v => mc.supportedVersions.includes(v) && table[v] && table[v].dataVersion >= table['1.20.2'].dataVersion)
   let best = null
   for (const v of supported) if (mcData.versionsByMinecraftVersion.pc[v]?.version === protocol) best = v
   return best

@@ -105,13 +105,16 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # the unit suite on each packaging OS, so a platform-specific failure shows before a release is cut
+      - run: npm test
       - name: Build installers
         run: npm run ${{ matrix.script }}
         env:
           # Unsigned. docs/PACKAGING.md lists what signing needs on each platform.
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       # The packaged Linux build is launched for real: the end-to-end suite runs against the
-      # unpacked application directory that the AppImage is made from.
+      # unpacked application directory that the AppImage is made from. (The test driver starts
+      # Electron with Chromium's sandbox switched off on Linux, so a sandboxed start is not covered.)
       - uses: actions/setup-java@v4
         if: matrix.name == 'linux'
         with:

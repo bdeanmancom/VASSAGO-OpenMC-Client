@@ -38,13 +38,13 @@ All runs: Linux x64, Node 22, loopback PaperMC servers started by `scripts/test-
 
 | Suite | Server | Client speaks | Result on the final tree |
 |---|---|---|---|
-| Unit (`npm test`) | — | — | 99 / 99 |
+| Unit (`npm test`) | — | — | 100 / 100 |
 | Integration (`npm run test:integration`) | Paper 26.3 build 244 + Via | 26.1 (negotiated — what the app does) | 30 / 30 |
 | Integration | same server | 1.21.11 (forced) | 30 / 30 |
 | Integration | same server, with an online-mode twin | 1.21.4 (forced) | 30 / 30 |
 | Integration | Paper 1.21.11 | 1.21.11 | 30 / 30 |
 | Integration | Paper 1.21.4 | 1.21.4 | 30 / 30 |
-| Integration | Paper 26.1.2 | 26.1 | 30 / 30 |
+| Integration | Paper 26.1.2 (26.1 and 26.1.1 share its protocol but were not run) | 26.1 | 30 / 30 |
 | Integration | Paper 1.21.11 + Via | 1.21.11 (the server's own version, chosen over the echoed protocol) | 30 / 30 |
 | Two-player soak (`npm run test:soak`) | Paper 26.3 + Via | 26.1 | 3 minutes, no disconnect: 31 rounds, 62 movements confirmed by the other player's client, 62 chat lines, 62 blocks placed and broken, 11 chest sessions, 8 deaths and respawns |
 | End-to-end (`npm run test:e2e`) | Paper 26.3 + Via | 26.1 | 22 / 22 steps |
@@ -75,9 +75,10 @@ against the packaged build. Runs #9 and #10 (earlier commits of this change) wer
 test job — on GitHub's runners: 1.21.11 with end-to-end, 26.1.2, 26.3 + Via with soak and
 end-to-end, 26.3 + Via forced to 1.21.11 — and for the Linux and Windows installers. In both, GitHub
 cancelled the macOS job after 15 minutes without ever assigning it a runner; the last macOS build
-that ran (run #7) produced the dmg and zip for arm64 and x64. The workflows now ask for a different
-macOS image, and the release workflow tries two. The result for the commit you are looking at is
-on the Actions tab; the 1.21.4 job and the packaged-build step are new in it.
+that ran before that (run #7) produced the dmg and zip for arm64 and x64. The workflows now ask for
+a different macOS image, and run #11 — all eight jobs green — built the macOS installers on it,
+ran the new 1.21.4 job, and launched the packaged Linux build (end-to-end 22 / 22). The result for
+the commit you are looking at is on the Actions tab.
 
 An independent check of the diagnosis (server bytecode of 26.1.2 / 26.2 / 26.3, Paper's patch for
 build 244, the ViaBackwards source and the protocol library, each fact-checked) reached the same
@@ -164,7 +165,9 @@ Application
   unsigned (SmartScreen / Gatekeeper warnings; see `docs/PACKAGING.md`). One user ran 0.1.0 from
   source on macOS (`npm start`) far enough to connect and be kicked by the bug fixed here. The
   AppImage *file* is not launched either — CI launches the unpacked directory it is made from, and
-  the note about Ubuntu's sandbox restriction in the release notes is from reading, not from a run.
+  does so with Chromium's sandbox switched off (the test driver's default on Linux). A sandboxed
+  start has never been tested, and the note about Ubuntu's sandbox restriction in the release
+  notes is from reading, not from a run.
 - **Real GPU performance.** All automated rendering used software GL (≈10–25 fps at 5 chunks,
   1280×800).
 - **Sessions longer than 11 minutes**, and servers with more than two players.

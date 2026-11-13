@@ -10,11 +10,16 @@ export class ConfigStore {
     this.file = path.join(dir, 'config.json')
   }
 
+  /** True when the last load() could not read the stored file and fell back to defaults. */
+  unreadable = false
+
   load (): AppConfig {
+    this.unreadable = false
     try {
       if (!fs.existsSync(this.file)) return defaultConfig()
       return sanitizeConfig(JSON.parse(fs.readFileSync(this.file, 'utf8')))
     } catch {
+      this.unreadable = true
       try { fs.renameSync(this.file, this.file + '.corrupt') } catch {}
       return defaultConfig()
     }

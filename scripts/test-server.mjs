@@ -81,7 +81,10 @@ async function downloadPaper (version, build, dest) {
 async function viaPlugins (mode) {
   if (mode !== 'latest') {
     const pins = JSON.parse(fs.readFileSync(path.join(root, 'scripts', 'via-pins.json'), 'utf8')).plugins
-    for (const p of pins) console.log(`[test-server] ${p.name} ${p.version} (pinned)`)
+    for (const p of pins) {
+      if (!/^[0-9a-f]{128}$/.test(p.sha512 ?? '')) throw new Error(`scripts/via-pins.json: ${p.name} has no sha512 checksum`)
+      console.log(`[test-server] ${p.name} ${p.version} (pinned)`)
+    }
     return pins.map(p => ({ url: p.url, file: `${p.name}-${p.version}.jar`, checksum: { sha512: p.sha512 } }))
   }
   const out = []
@@ -171,6 +174,11 @@ export async function prepareServer (opts) {
   for (const { url, file, checksum } of wanted) {
     if (/^https:\/\//.test(url)) {
       const cached = path.join(cache, file)
+      // a pinned jar is checked every time it is used, not only when it was downloaded
+      if (fs.existsSync(cached) && checksum?.sha512 && createHash('sha512').update(fs.readFileSync(cached)).digest('hex') !== checksum.sha512) {
+        console.log(`[test-server] cached ${file} does not match its checksum; downloading it again`)
+        fs.rmSync(cached)
+      }
       if (!fs.existsSync(cached)) { console.log(`[test-server] downloading plugin ${file}…`); await download(url, cached, checksum) }
       fs.copyFileSync(cached, path.join(pluginDir, file))
     } else fs.copyFileSync(path.resolve(url), path.join(pluginDir, file))

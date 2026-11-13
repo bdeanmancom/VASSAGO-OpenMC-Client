@@ -26,14 +26,18 @@ All gameplay tests run against a real [PaperMC](https://papermc.io) server start
 | End-to-end | `xvfb-run -a npm run test:e2e` | Launches the real Electron app with Playwright (the built source tree, or a packaged build via `VASSAGO_APP_PATH`), clicks through the launcher, joins the server, checks rendering, input, chat UI, block interaction, inventory/crafting/chest screens, HUD, death screen, debug overlay, kick + reconnect, diagnostics export. Screenshots land in `tests/e2e/artifacts/`. |
 
 Set `VASSAGO_TEST_PORT` (and `VASSAGO_TEST_ONLINE_PORT`) to reuse already-running servers instead of
-booting new ones — handy while iterating. Commands the suites send are the vanilla ones, spelled
-`/minecraft:give` and so on, so they keep their meaning on a server where a plugin such as
-EssentialsX replaces `/give`, `/tp` or `/gamemode`.
+booting new ones — handy while iterating. The soak test (and the harness helpers it uses) send
+vanilla commands spelled `/minecraft:give` and so on, so it also runs on a server where a plugin
+such as EssentialsX replaces `/give`, `/tp` or `/gamemode`. The integration and end-to-end suites
+use the plain spellings and need a server without such plugins.
 
 `VASSAGO_APP_PATH=<path to a packaged executable>` makes the end-to-end suite drive a packaged
 build instead of the source tree; CI does this for the Linux package
 (`release/linux-unpacked/vassago-client`). Without it the suite builds the source tree first, so
-its result always describes the current source (`VASSAGO_E2E_NO_BUILD=1` skips that).
+its result describes the current source (`VASSAGO_E2E_NO_BUILD=1` skips that; the generated
+game-data tables are only created when missing — run `npm run gen:data` after changing the
+generator or bumping `minecraft-data`). On Linux
+the test driver starts Electron with Chromium's sandbox switched off, in CI too.
 
 The suites switch a reused server to peaceful difficulty and turn its whitelist off before the
 second test player joins. To soak-test a server that is *meant* to be whitelisted (with
