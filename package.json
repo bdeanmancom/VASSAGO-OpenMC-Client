@@ -1,0 +1,50 @@
+{
+  "name": "vassago-client",
+  "productName": "Vassago",
+  "version": "0.1.0",
+  "description": "Vassago — a free, independent, open-source client compatible with Minecraft: Java Edition servers. Not affiliated with Mojang or Microsoft.",
+  "license": "MIT",
+  "author": "Vassago Client contributors",
+  "homepage": "https://github.com/bdeanmancom/VASSAGO-OpenMC-Client",
+  "main": "dist/main/main.js",
+  "private": true,
+  "scripts": {
+    "gen:data": "node scripts/gen-blockdata.mjs",
+    "build": "npm run gen:data && node scripts/build.mjs",
+    "build:fast": "node scripts/build.mjs",
+    "start": "npm run build && electron .",
+    "dev": "node scripts/build.mjs && electron .",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run tests/unit",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:e2e": "node tests/e2e/run-e2e.mjs",
+    "test-server": "node scripts/test-server.mjs",
+    "dist": "npm run build && electron-builder --publish never",
+    "dist:linux": "npm run build && electron-builder --linux --publish never",
+    "dist:win": "npm run build && electron-builder --win --publish never",
+    "dist:mac": "npm run build && electron-builder --mac --publish never"
+  },
+  "dependencies": {
+    "minecraft-data": "^3.119.0",
+    "minecraft-protocol": "^1.68.0",
+    "mineflayer": "^4.39.0",
+    "prismarine-auth": "^3.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@types/three": "^0.170.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^39.2.0",
+    "electron-builder": "^25.1.8",
+    "esbuild": "^0.24.0",
+    "playwright": "^1.49.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "three": "^0.170.0",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.3",
+    "vitest": "^2.1.8"
+  }
+}
